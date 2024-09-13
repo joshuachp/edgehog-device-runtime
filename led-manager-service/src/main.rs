@@ -18,8 +18,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+use log::{debug, info, LevelFilter};
 use zbus::{dbus_interface, ConnectionBuilder};
 
+pub const SERVICE_NAME: &str = "io.edgehog.LedManager";
+
+#[derive(Debug)]
 struct LedManager {
     leds: Vec<String>,
 }
@@ -27,31 +31,44 @@ struct LedManager {
 #[dbus_interface(name = "io.edgehog.LedManager1")]
 impl LedManager {
     fn list(&self) -> Vec<String> {
+        debug!("listing {} leds", self.leds.len());
+
         self.leds.clone()
     }
 
     fn insert(&mut self, id: String) {
+        debug!("adding led {id}");
+
         self.leds.push(id);
     }
 
     fn set(&self, id: String, status: bool) -> bool {
-        let result = true;
-        print!("SET {} -> {}: result {}", id, status, result);
-        result
+        const RESULT: bool = true;
+
+        info!("SET {} -> {}: result {}", id, status, RESULT);
+
+        RESULT
     }
 }
 
 #[tokio::main]
-async fn main() -> zbus::Result<()> {
+async fn main() -> stable_eyre::Result<()> {
+    stable_eyre::install()?;
+    env_logger::builder()
+        .filter_level(LevelFilter::Info)
+        .try_init()?;
+
     let leds = LedManager { leds: Vec::new() };
 
     let _conn = ConnectionBuilder::session()?
-        .name("io.edgehog.LedManager")?
+        .name(SERVICE_NAME)?
         .serve_at("/io/edgehog/LedManager", leds)?
         .build()
         .await?;
 
-    loop {
-        std::thread::park()
-    }
+    info!("Service {SERVICE_NAME} started");
+
+    tokio::signal::ctrl_c().await?;
+
+    Ok(())
 }

@@ -20,6 +20,7 @@
 
 use crate::error::DeviceManagerError;
 use astarte_device_sdk::AstarteAggregate;
+use log::error;
 use procfs::Current;
 
 #[derive(Debug, AstarteAggregate)]
@@ -31,16 +32,28 @@ pub struct SystemStatus {
     pub uptimeMillis: i64,
 }
 
-/// get structured data for `io.edgehog.devicemanager.SystemStatus` interface
-pub fn get_system_status() -> Result<SystemStatus, DeviceManagerError> {
-    let meminfo = procfs::Meminfo::current()?;
+impl SystemStatus {
+    /// get structured data for `io.edgehog.devicemanager.SystemStatus` interface
+    pub fn read() -> Option<Self> {
+        let meminfo = match procfs::Meminfo::current() {
+            Ok(meminfo) => meminfo,
+            Err(err) => {
+                error!(
+                    "couldn't get current process meminfo: {}",
+                    stable_eyre::Report::new(err)
+                );
 
-    Ok(SystemStatus {
-        availMemoryBytes: meminfo.mem_available.unwrap_or(0) as i64,
-        bootId: procfs::sys::kernel::random::boot_id()?,
-        taskCount: procfs::process::all_processes()?.count() as i32,
-        uptimeMillis: procfs::Uptime::current()?.uptime_duration().as_millis() as i64,
-    })
+                return None;
+            }
+        };
+
+        Ok(SystemStatus {
+            availMemoryBytes: meminfo.mem_available.unwrap_or(0) as i64,
+            bootId: procfs::sys::kernel::random::boot_id()?,
+            taskCount: procfs::process::all_processes()?.count() as i32,
+            uptimeMillis: procfs::Uptime::current()?.uptime_duration().as_millis() as i64,
+        })
+    }
 }
 
 #[cfg(test)]

@@ -30,10 +30,10 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::error::DeviceManagerError;
-use crate::ota::ota_handle::{run_ota, Ota, OtaRequest, OtaStatus, PersistentState};
 use crate::ota::ota_handler::{OtaEvent, OtaHandler};
 use crate::ota::rauc::BundleInfo;
 use crate::ota::{DeployStatus, MockSystemUpdate, OtaError, ProgressStream};
+use crate::ota::{Ota, OtaId, OtaStatus, PersistentState};
 use crate::repository::MockStateRepository;
 
 pub(crate) fn deploy_status_stream<I>(iter: I) -> Result<ProgressStream, DeviceManagerError>
@@ -47,8 +47,9 @@ impl OtaHandler {
     fn mock_new(
         system_update: MockSystemUpdate,
         state_repository: MockStateRepository<PersistentState>,
+        tx_publisher: mpsc::Sender<OtaStatus>,
     ) -> Self {
-        let ota = Ota::mock_new(system_update, state_repository);
+        let ota = Ota::mock_new(system_update, state_repository, tx_publisher);
 
         Self::mock_new_with_ota(ota)
     }
@@ -57,8 +58,10 @@ impl OtaHandler {
         system_update: MockSystemUpdate,
         state_repository: MockStateRepository<PersistentState>,
         prefix: &str,
+        tx_publisher: mpsc::Sender<OtaStatus>,
     ) -> (Self, tempdir::TempDir) {
-        let (ota, dir) = Ota::mock_new_with_path(system_update, state_repository, prefix);
+        let (ota, dir) =
+            Ota::mock_new_with_path(system_update, state_repository, prefix, tx_publisher);
 
         let handler = Self::mock_new_with_ota(ota);
 
@@ -72,7 +75,7 @@ impl OtaHandler {
 
         Self {
             sender,
-            ota_cancellation: Arc::new(RwLock::new(None)),
+            cancel: Arc::new(RwLock::new(None)),
         }
     }
 }
@@ -712,7 +715,7 @@ async fn ota_event_update_already_in_progress_same_uuid() {
 
     let ota = Ota::mock_new(system_update, state_mock);
     // Fake another update is happening state != idle
-    *ota.ota_status.write().await = OtaStatus::Acknowledged(OtaRequest { uuid, url: ota_url });
+    *ota.ota_status.write().await = OtaStatus::Acknowledged(OtaId { uuid, url: ota_url });
 
     let ota_handler = OtaHandler::mock_new_with_ota(ota);
 
@@ -768,7 +771,7 @@ async fn ota_event_update_already_in_progress_different_uuid() {
 
     let ota = Ota::mock_new(system_update, state_mock);
     // Fake another update is happening state != idle
-    *ota.ota_status.write().await = OtaStatus::Acknowledged(OtaRequest {
+    *ota.ota_status.write().await = OtaStatus::Acknowledged(OtaId {
         uuid: uuid_2,
         url: ota_url,
     });
@@ -799,13 +802,13 @@ async fn ota_event_canceled() {
     let system_update = MockSystemUpdate::new();
 
     let ota = Ota::mock_new(system_update, state_repository);
-    *ota.ota_status.write().await = OtaStatus::Acknowledged(OtaRequest {
+    *ota.ota_status.write().await = OtaStatus::Acknowledged(OtaId {
         uuid,
         url: "".to_string(),
     });
 
     let ota_handler = OtaHandler::mock_new_with_ota(ota);
-    *ota_handler.ota_cancellation.write().await = Some(cancel_token.clone());
+    *ota_handler.cancel.write().await = Some(cancel_token.clone());
 
     let mut ota_req_map = HashMap::new();
     ota_req_map.insert(
@@ -923,7 +926,7 @@ async fn ota_event_success_after_canceled_event() {
     let ack = rx_update.recv().await.expect("failed to receive ack");
     assert_eq!(
         ack,
-        OtaStatus::Acknowledged(OtaRequest {
+        OtaStatus::Acknowledged(OtaId {
             uuid,
             url: ota_url.clone()
         })
@@ -959,7 +962,7 @@ async fn ota_event_success_after_canceled_event() {
     assert_eq!(
         status,
         OtaStatus::Downloading(
-            OtaRequest {
+            OtaId {
                 uuid,
                 url: ota_url.clone()
             },
@@ -1142,7 +1145,7 @@ async fn ota_event_not_canceled() {
         .returning(|_: &str, _: &str, _: OtaEvent| Ok(()));
 
     let (ota, _dir) = Ota::mock_new_with_path(system_update, state_mock, "not_cancelled");
-    *ota.ota_status.write().await = OtaStatus::Success(OtaRequest {
+    *ota.ota_status.write().await = OtaStatus::Success(OtaId {
         uuid,
         url: "".to_string(),
     });
@@ -1239,7 +1242,7 @@ async fn ota_event_not_canceled_different_uuid() {
 
     let (ota, _dir) =
         Ota::mock_new_with_path(system_update, state_mock, "calcelled_different_uuid");
-    *ota.ota_status.write().await = OtaStatus::Deployed(OtaRequest {
+    *ota.ota_status.write().await = OtaStatus::Deployed(OtaId {
         uuid: uuid_2,
         url: "".to_string(),
     });

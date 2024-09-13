@@ -136,7 +136,6 @@ impl<P> Forwarder<P> {
         P: Publisher + 'static + Send + Sync,
     {
         // unset all the existing sessions
-        // TODO: the following snippet assumes that the property has been stored, which is not the case until the [issue #346](https://github.com/edgehog-device-manager/edgehog-device-runtime/issues/346) is solved
         debug!("unsetting ForwarderSessionState property");
         for prop in publisher
             .interface_props(FORWARDER_SESSION_STATE_INTERFACE)
@@ -155,20 +154,10 @@ impl<P> Forwarder<P> {
     }
 
     /// Start a device forwarder instance.
-    pub fn handle_sessions(&mut self, astarte_event: DeviceEvent)
+    pub fn handle_sessions(&mut self, sinfo: SessionInfo)
     where
         P: Publisher + Clone + 'static + Send + Sync,
     {
-        // retrieve the Url that the device must use to open a WebSocket connection with a host
-        let sinfo = match SessionInfo::from_event(astarte_event) {
-            Ok(sinfo) => sinfo,
-            // error while retrieving the connection information from the Astarte data
-            Err(err) => {
-                error!("{err}");
-                return;
-            }
-        };
-
         let edgehog_url = match Url::try_from(&sinfo) {
             Ok(url) => url,
             Err(err) => {

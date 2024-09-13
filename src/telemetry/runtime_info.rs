@@ -18,30 +18,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-use crate::error::DeviceManagerError;
-use astarte_device_sdk::types::AstarteType;
-use std::collections::HashMap;
+use crate::data::{publish, Publisher};
+
+const INTERFACE: &str = "io.edgehog.devicemanager.RuntimeInfo";
 
 /// get structured data for `io.edgehog.devicemanager.RuntimeInfo` interface
-pub fn get_runtime_info() -> Result<HashMap<String, AstarteType>, DeviceManagerError> {
-    let mut ret: HashMap<String, AstarteType> = HashMap::new();
+pub async fn send_runtime_info<T>(client: &T)
+where
+    T: Publisher,
+{
+    let values = [
+        ("/name", env!("CARGO_PKG_NAME").to_string()),
+        ("/url", env!("CARGO_PKG_HOMEPAGE").to_string()),
+        ("/version", env!("CARGO_PKG_VERSION").to_string()),
+        (
+            "/environment",
+            format!("Rust {}", rustc_version_runtime::version()),
+        ),
+    ];
 
-    if let Ok(f) = std::env::var("CARGO_PKG_NAME") {
-        ret.insert("/name".to_owned(), f.into());
+    for (path, data) in values {
+        publish(client, INTERFACE, path, data).await;
     }
-
-    if let Ok(f) = std::env::var("CARGO_PKG_HOMEPAGE") {
-        ret.insert("/url".to_owned(), f.into());
-    }
-
-    if let Ok(f) = std::env::var("CARGO_PKG_VERSION") {
-        ret.insert("/version".to_owned(), f.into());
-    }
-
-    ret.insert(
-        "/environment".to_owned(),
-        format!("Rust {}", rustc_version_runtime::version()).into(),
-    );
-
-    Ok(ret)
 }

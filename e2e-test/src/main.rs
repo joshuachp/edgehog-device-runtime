@@ -149,7 +149,7 @@ async fn main() -> color_eyre::Result<()> {
         .await
         .wrap_err("couldn't connect to astarte")?;
 
-    let dm = DeviceManager::new(device_options, pub_sub, handle).await?;
+    let dm = DeviceManager::start(device_options, pub_sub, handle).await?;
 
     dm.init().await?;
 

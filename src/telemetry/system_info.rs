@@ -1,3 +1,4 @@
+use crate::data::{publish, Publisher};
 /*
  * This file is part of Edgehog.
  *
@@ -19,55 +20,117 @@
  */
 use crate::error::DeviceManagerError;
 use astarte_device_sdk::types::AstarteType;
+use log::error;
 use procfs::cmdline;
 use std::collections::HashMap;
 use std::env;
 
-pub fn get_system_info() -> Result<HashMap<String, AstarteType>, DeviceManagerError> {
-    let cmdline_params = cmdline().unwrap();
-    let mut seral_number: Option<String> = env::var("EDGEHOG_SYSTEM_SERIAL_NUMBER").ok();
-    let mut part_number: Option<String> = env::var("EDGEHOG_SYSTEM_PART_NUMBER").ok();
-    for param in cmdline_params.iter() {
-        if seral_number.is_none() && param.starts_with("edgehog_system_serial_number") {
-            let first_half = format!("{}=", "edgehog_system_serial_number");
-            seral_number = Some(param.replace(first_half.as_str(), ""));
+#[derive(Debug, Default)]
+pub struct SystemInfo {
+    serial_number: Option<String>,
+    part_number: Option<String>,
+}
+
+impl SystemInfo {
+    const INTERFACE: &str = "io.edgehog.devicemanager.SystemInfo";
+
+    pub fn read() -> Self {
+        let mut serial_number: Option<String> = env::var("EDGEHOG_SYSTEM_SERIAL_NUMBER").ok();
+        let mut part_number: Option<String> = env::var("EDGEHOG_SYSTEM_PART_NUMBER").ok();
+
+        match cmdline() {
+            Ok(cmdline) => {
+                cmdline
+                    .iter()
+                    .filter_map(|line| line.split_once('='))
+                    .for_each(|(k, v)| match k {
+                        "edgehog_system_serial_number" => serial_number = Some(v.to_string()),
+                        "edgehog_system_part_number" => part_number = Some(v.to_string()),
+                        _ => {}
+                    });
+            }
+            Err(err) => {
+                error!(
+                    "couldn't read the kernel cmd line: {}",
+                    stable_eyre::Report::new(err)
+                );
+            }
         }
-        if part_number.is_none() && param.starts_with("edgehog_system_part_number") {
-            let first_half = format!("{}=", "edgehog_system_part_number");
-            part_number = Some(param.replace(first_half.as_str(), ""));
+
+        Self {
+            serial_number,
+            part_number,
+        }
+
+        //let mut ret: HashMap<String, AstarteType> = HashMap::new();
+        //if let Some(f) = seral_number {
+        //    ret.insert("/serialNumber".to_owned(), f.into());
+        //}
+        //if let Some(f) = part_number {
+        //    ret.insert("/partNumber".to_owned(), f.into());
+        //}
+    }
+
+    pub async fn send<T>(self, client: &T)
+    where
+        T: Publisher,
+    {
+        if let Some(serial_number) = self.serial_number {
+            publish(client, Self::INTERFACE, "/serialNumber", serial_number).await;
+        }
+
+        if let Some(part_number) = self.part_number {
+            publish(client, Self::INTERFACE, "/partNumber", part_number).await;
         }
     }
-    let mut ret: HashMap<String, AstarteType> = HashMap::new();
-    if let Some(f) = seral_number {
-        ret.insert("/serialNumber".to_owned(), f.into());
-    }
-    if let Some(f) = part_number {
-        ret.insert("/partNumber".to_owned(), f.into());
-    }
-    Ok(ret)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::telemetry::system_info::get_system_info;
-    use astarte_device_sdk::types::AstarteType;
-    use std::env;
+    use crate::data::tests::MockPubSub;
+
+    use super::*;
 
     #[test]
     fn get_system_info_test() {
         env::set_var("EDGEHOG_SYSTEM_SERIAL_NUMBER", "serial#");
         env::set_var("EDGEHOG_SYSTEM_PART_NUMBER", "part#");
 
-        let sysinfo = get_system_info();
-        assert!(sysinfo.is_ok());
-        let sysinfo_map = sysinfo.unwrap();
-        assert_eq!(
-            sysinfo_map.get("/serialNumber").unwrap().to_owned(),
-            AstarteType::String("serial#".to_string())
-        );
-        assert_eq!(
-            sysinfo_map.get("/partNumber").unwrap().to_owned(),
-            AstarteType::String("part#".to_string())
-        );
+        let sysinfo = SystemInfo::read();
+
+        assert_eq!(sysinfo.serial_number.unwrap(), "serial#");
+        assert_eq!(sysinfo.part_number.unwrap(), "part#");
+    }
+
+    #[tokio::test]
+    async fn should_send_system_info() {
+        let sysinfo = SystemInfo {
+            serial_number: Some("serial".to_string()),
+            part_number: Some("part".to_string()),
+        };
+
+        let mut client = MockPubSub::new();
+
+        client
+            .expect_send()
+            .times(1)
+            .withf(|interface, path, data| {
+                interface == "io.edgehog.devicemanager.SystemInfo"
+                    && path == "/serialNumber"
+                    && *data == AstarteType::String("serial".to_string())
+            })
+            .returning(|_, _, _| Ok(()));
+
+        client
+            .expect_send()
+            .times(1)
+            .withf(|interface, path, data| {
+                interface == "io.edgehog.devicemanager.SystemInfo"
+                    && path == "/partNumber"
+                    && *data == AstarteType::String("part".to_string())
+            })
+            .returning(|_, _, _| Ok(()));
+
+        sysinfo.send(&client).await;
     }
 }

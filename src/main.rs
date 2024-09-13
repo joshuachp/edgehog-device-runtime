@@ -102,7 +102,7 @@ async fn main() -> stable_eyre::Result<()> {
         }
     };
 
-    let dm = edgehog_device_runtime::DeviceManager::new(options, pub_sub, handle).await?;
+    let dm = edgehog_device_runtime::DeviceManager::start(options, pub_sub, handle).await?;
 
     dm.init().await?;
 
