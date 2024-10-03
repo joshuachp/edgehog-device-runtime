@@ -36,6 +36,7 @@ pub mod error;
 mod properties;
 pub mod request;
 pub mod service;
+mod store;
 
 #[cfg(feature = "mock")]
 mod mock;
