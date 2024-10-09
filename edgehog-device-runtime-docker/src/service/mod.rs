@@ -34,6 +34,7 @@ use tracing::{debug, info, instrument};
 
 use crate::{
     error::DockerError,
+    image::Image,
     properties::PropError,
     requests::{CreateRequests, ReqError},
     Docker,
@@ -256,7 +257,7 @@ impl State {
     {
         match self {
             State::Missing => {
-                let node = node.into();
+                let mut node = node.into();
 
                 node.store(id, device).await?;
 
@@ -372,7 +373,9 @@ impl State {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum NodeType {}
+pub(crate) enum NodeType {
+    Image(Image<String>),
+}
 
 impl NodeType {
     #[instrument(skip_all)]

@@ -22,12 +22,15 @@ use std::borrow::Cow;
 use std::io::{self, Cursor, SeekFrom};
 use std::path::Path;
 
+use image::ImageState;
 use serde::{Deserialize, Serialize};
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, AsyncSeekExt, AsyncWriteExt, BufReader, BufWriter};
 
 use crate::service::node::Nodes;
-use crate::service::Node;
+use crate::service::{Node, NodeType};
+
+pub(crate) mod image;
 
 /// Error returned by the [`StateStore`].
 #[non_exhaustive]
@@ -177,7 +180,7 @@ struct Value<'a> {
     edgehog_id: Cow<'a, str>,
     local_id: Option<Cow<'a, str>>,
     started: bool,
-    resource: Option<Resources>,
+    resource: Option<Resource<'a>>,
 }
 
 impl<'a> From<&'a Node> for Value<'a> {
@@ -186,7 +189,13 @@ impl<'a> From<&'a Node> for Value<'a> {
 
         let (local_id, resource) = match value.node_type() {
             None => (None, None),
-            Some(node_type) => unimplemented!(),
+            Some(NodeType::Image(image)) => {
+                let state = ImageState::from(image);
+
+                let local_id = image.id.as_deref().map(Cow::Borrowed);
+
+                (local_id, Some(Resource::Image(state)))
+            }
         };
 
         Self {
@@ -199,4 +208,6 @@ impl<'a> From<&'a Node> for Value<'a> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum Resources {}
+enum Resource<'a> {
+    Image(ImageState<'a>),
+}
