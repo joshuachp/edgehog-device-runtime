@@ -30,6 +30,7 @@ astarte-device-sdk = { workspace = true, features = ["derive"] }
 async-trait = { workspace = true }
 base64 = { workspace = true }
 bollard = { workspace = true }
+cfg-if = { workspace = true }
 displaydoc = { workspace = true }
 futures = { workspace = true }
 hyper = { workspace = true, optional = true }
@@ -43,6 +44,7 @@ tokio = { workspace = true, features = ["macros", "fs", "io-util"] }
 tracing = { workspace = true, features = ["log"] }
 
 [dev-dependencies]
+astarte-device-sdk-mock = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [features]
