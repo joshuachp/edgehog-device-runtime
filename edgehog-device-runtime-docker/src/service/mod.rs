@@ -35,8 +35,9 @@ use tracing::{debug, info, instrument};
 use crate::{
     error::DockerError,
     image::Image,
-    properties::PropError,
-    requests::{CreateRequests, ReqError},
+    properties::{image::AvailableImage, PropError},
+    requests::{image::CreateImage, CreateRequests, ReqError},
+    store::{StateStore, StateStoreError},
     Docker,
 };
 
@@ -71,6 +72,8 @@ pub enum ServiceError {
     /// couldn't operate on missing node {0}
     Missing(String),
     /// error from the Astarte SDK
+    StateStore(#[from] StateStoreError),
+    /// error from the Astarte SDK
     Astarte(#[from] AstarteError),
     /// BUG couldn't convert missing node
     BugMissing,
@@ -92,6 +95,7 @@ where
     D: Debug + Client + PropAccess,
 {
     client: Docker,
+    store: StateStore,
     device: D,
     nodes: Nodes,
 }
@@ -102,9 +106,10 @@ where
 {
     /// Create a new service
     #[must_use]
-    pub fn new(client: Docker, device: D) -> Self {
+    pub fn new(client: Docker, store: StateStore, device: D) -> Self {
         Self {
             client,
+            store,
             device,
             nodes: Nodes::new(),
         }
@@ -112,8 +117,8 @@ where
 
     /// Initialize the service, it will load all the already stored properties
     #[instrument(skip_all)]
-    pub async fn init(client: Docker, device: D) -> Result<Self> {
-        let services = Self::new(client, device);
+    pub async fn init(client: Docker, store: StateStore, device: D) -> Result<Self> {
+        let services = Self::new(client, store, device);
 
         // TODO: load the resources
 
@@ -128,13 +133,41 @@ where
     {
         let event = CreateRequests::from_event(event)?;
 
-        match event {}
+        match event {
+            CreateRequests::Image(req) => self.create_image(req).await,
+        }
+    }
+
+    /// Store the create image request
+    #[instrument(skip_all)]
+    async fn create_image(&mut self, req: CreateImage) -> Result<()> {
+        let id = Id::new(&req.id);
+
+        let device = &self.device;
+
+        self.nodes
+            .add_node(
+                id,
+                |id, idx| async move {
+                    let image = Image::from(req);
+
+                    let mut node = Node::new(id, idx);
+
+                    node.store(device, image).await?;
+
+                    Ok(node)
+                },
+                &[],
+            )
+            .await?;
+
+        Ok(())
     }
 
     /// Will start an application
     #[instrument(skip(self))]
     pub async fn start(&mut self, id: &str) -> Result<()> {
-        let id = Id::new(id.to_string());
+        let id = Id::new(id);
 
         let start_idx = self
             .nodes
@@ -250,16 +283,22 @@ pub(crate) enum State {
 
 impl State {
     #[instrument(skip_all)]
-    async fn store<D, T>(&mut self, id: &Id, device: &D, node: T) -> Result<()>
+    async fn store<D, T>(
+        &mut self,
+        id: &Id,
+        device: &D,
+        store: &mut StateStore,
+        node: T,
+    ) -> Result<()>
     where
         D: Debug + Client + Sync,
         T: Into<NodeType> + Debug,
     {
         match self {
             State::Missing => {
-                let mut node = node.into();
+                let mut node: NodeType = node.into();
 
-                node.store(id, device).await?;
+                node.store(id, store, device).await?;
 
                 *self = State::Stored(node);
 
@@ -379,11 +418,19 @@ pub(crate) enum NodeType {
 
 impl NodeType {
     #[instrument(skip_all)]
-    async fn store<D>(&mut self, _id: &Id, _device: &D) -> Result<()>
+    async fn store<D>(&mut self, id: &Id, store: &mut StateStore, device: &D) -> Result<()>
     where
         D: Debug + Client + Sync,
     {
-        unimplemented!()
+        match self {
+            NodeType::Image(image) => {
+                AvailableImage::new(id, false).send(device).await?;
+
+                info!("stored image with id {}", id);
+            }
+        }
+
+        Ok(())
     }
 
     #[instrument(skip_all)]
@@ -403,14 +450,21 @@ impl NodeType {
     }
 }
 
+impl From<Image<String>> for NodeType {
+    fn from(value: Image<String>) -> Self {
+        Self::Image(value)
+    }
+}
+
 /// Id of the nodes in the Service graph
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct Id(Arc<str>);
 
 impl Id {
     /// Create a new ID
-    pub(crate) fn new(id: String) -> Self {
-        Self(id.into())
+    pub(crate) fn new(id: &str) -> Self {
+        // From a String it will call from str.
+        Self(Arc::from(id))
     }
 
     pub(crate) fn as_str(&self) -> &str {

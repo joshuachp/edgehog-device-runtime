@@ -28,7 +28,7 @@ use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, AsyncSeekExt, AsyncWriteExt, BufReader, BufWriter};
 
 use crate::service::node::Nodes;
-use crate::service::{Node, NodeType};
+use crate::service::{Id, Node, NodeType};
 
 pub(crate) mod image;
 
@@ -110,17 +110,19 @@ impl StateStore {
     }
 
     /// Appends the new struct to the state store
-    pub(crate) async fn append<T>(&mut self, data: T) -> Result<()>
-    where
-        T: Serialize,
-    {
+    pub(crate) async fn append<'a, T>(
+        &mut self,
+        id: &Id,
+        started: bool,
+        node: &'a NodeType,
+    ) -> Result<()> {
         // At the end
         self.file
             .seek(SeekFrom::End(0))
             .await
             .map_err(StateStoreError::Append)?;
 
-        let content = serde_json::to_string(&data).map_err(StateStoreError::Serialize)?;
+        let content = serde_json::to_string(&value).map_err(StateStoreError::Serialize)?;
 
         self.file
             .write_all(content.as_bytes())
@@ -177,8 +179,7 @@ impl StateStore {
 /// State stored, includes the remote and local id of the resource
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Value<'a> {
-    edgehog_id: Cow<'a, str>,
-    local_id: Option<Cow<'a, str>>,
+    id: Cow<'a, str>,
     started: bool,
     resource: Option<Resource<'a>>,
 }
@@ -187,21 +188,13 @@ impl<'a> From<&'a Node> for Value<'a> {
     fn from(value: &'a Node) -> Self {
         let started = value.state().is_up();
 
-        let (local_id, resource) = match value.node_type() {
-            None => (None, None),
-            Some(NodeType::Image(image)) => {
-                let state = ImageState::from(image);
-
-                let local_id = image.id.as_deref().map(Cow::Borrowed);
-
-                (local_id, Some(Resource::Image(state)))
-            }
-        };
+        let resource = value.node_type().map(|t| match t {
+            NodeType::Image(image) => Resource::Image(ImageState::from(image)),
+        });
 
         Self {
-            edgehog_id: Cow::Borrowed(value.id().as_str()),
+            id: Cow::Borrowed(value.id().as_str()),
             started,
-            local_id,
             resource,
         }
     }
@@ -210,4 +203,10 @@ impl<'a> From<&'a Node> for Value<'a> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum Resource<'a> {
     Image(ImageState<'a>),
+}
+
+impl<'a> From<&'a NodeType> for Resource<'a> {
+    fn from(value: &'a NodeType) -> Self {
+        todo!()
+    }
 }

@@ -26,6 +26,7 @@ use crate::image::Image;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ImageState<'a> {
+    id: Option<Cow<'a, str>>,
     reference: Cow<'a, str>,
     registry_auth: Option<Cow<'a, str>>,
 }
@@ -36,6 +37,7 @@ where
 {
     fn from(value: &'a Image<S>) -> Self {
         Self {
+            id: value.id.as_deref().map(Cow::Borrowed),
             reference: Cow::Borrowed(value.reference.as_ref()),
             registry_auth: value
                 .registry_auth

@@ -67,7 +67,7 @@ impl Nodes {
             .filter(|node| !node.state.is_missing())
     }
 
-    pub(crate) fn add_node_sync<F>(&mut self, id: Id, f: F, deps: Vec<String>) -> Result<&mut Node>
+    pub(crate) fn add_node_sync<F>(&mut self, id: Id, f: F, deps: &[String]) -> Result<&mut Node>
     where
         F: FnOnce(Id, NodeIndex) -> Result<Node>,
     {
@@ -95,7 +95,7 @@ impl Nodes {
         &mut self,
         id: Id,
         f: F,
-        deps: Vec<String>,
+        deps: &[String],
     ) -> Result<&mut Node>
     where
         F: FnOnce(Id, NodeIndex) -> O,
@@ -149,7 +149,7 @@ impl Nodes {
     }
 
     /// Get or add as missing the node dependencies
-    fn get_node_deps(&mut self, deps: Vec<String>) -> NodeDeps {
+    fn get_node_deps(&mut self, deps: &[String]) -> NodeDeps {
         let present = deps
             .iter()
             .filter_map(|id| {
@@ -168,8 +168,8 @@ impl Nodes {
     }
 
     /// Add a missing node
-    fn add_missing(&mut self, id: String) -> Option<(Id, NodeIndex)> {
-        if self.nodes.contains_key(id.as_str()) {
+    fn add_missing(&mut self, id: &str) -> Option<(Id, NodeIndex)> {
+        if self.nodes.contains_key(id) {
             return None;
         }
 
