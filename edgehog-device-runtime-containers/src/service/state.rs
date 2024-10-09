@@ -44,7 +44,7 @@ impl State {
     {
         match self {
             State::Missing => {
-                let node = node.into();
+                let mut node = node.into();
 
                 node.store(id, device).await?;
 
