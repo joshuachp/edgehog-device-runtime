@@ -27,7 +27,10 @@ use std::{
 };
 
 use itertools::Itertools;
-use petgraph::stable_graph::{NodeIndex, StableDiGraph};
+use petgraph::{
+    stable_graph::{NodeIndex, StableDiGraph},
+    Direction,
+};
 use tracing::{debug, error, instrument};
 
 use crate::service::ServiceError;
@@ -58,6 +61,13 @@ impl NodeGraph {
         self.relations.node_weight(idx)
     }
 
+    /// Get the dependencies of a node
+    pub(crate) fn deps(&self, node: &Node) -> impl Iterator<Item = &Id> {
+        self.relations
+            .neighbors_directed(node.idx, Direction::Outgoing)
+            .filter_map(|dep| self.get_id(dep))
+    }
+
     /// Get a reference to a node
     pub(crate) fn node(&mut self, id: &Id) -> Option<&Node> {
         self.nodes.get(id).filter(|node| !node.state().is_missing())
@@ -69,11 +79,12 @@ impl NodeGraph {
             .filter(|node| !node.state().is_missing())
     }
 
-    pub(crate) fn add_node_sync<F>(&mut self, id: Id, f: F, deps: &[String]) -> Result<&mut Node>
+    pub(crate) fn add_node_sync<F, S>(&mut self, id: Id, f: F, deps: &[S]) -> Result<&mut Node>
     where
         F: FnOnce(Id, NodeIndex) -> Result<Node>,
+        S: AsRef<str>,
     {
-        let deps = self.get_node_deps(deps);
+        let deps = self.create_node_deps(deps);
 
         match self.nodes.entry(id) {
             Entry::Occupied(node) => {
@@ -103,7 +114,7 @@ impl NodeGraph {
         F: FnOnce(Id, NodeIndex) -> O,
         O: Future<Output = Result<Node>>,
     {
-        let deps = self.get_node_deps(deps);
+        let deps = self.create_node_deps(deps);
 
         let res = {
             match self.nodes.entry(id.clone()) {
@@ -151,19 +162,22 @@ impl NodeGraph {
     }
 
     /// Get or add as missing the node dependencies
-    fn get_node_deps(&mut self, deps: &[String]) -> NodeDeps {
+    fn create_node_deps<S>(&mut self, deps: &[S]) -> NodeDeps
+    where
+        S: AsRef<str>,
+    {
         let present = deps
             .iter()
             .filter_map(|id| {
                 self.nodes
-                    .get(id.as_str())
+                    .get(id.as_ref())
                     .map(|node| (node.id.clone(), node.idx))
             })
             .collect();
 
         let missing = deps
             .iter()
-            .filter_map(|id| self.add_missing(id))
+            .filter_map(|id| self.add_missing(id.as_ref()))
             .collect_vec();
 
         NodeDeps { present, missing }

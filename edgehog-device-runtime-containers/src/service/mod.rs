@@ -31,6 +31,7 @@ use astarte_device_sdk::{
 use tracing::{debug, instrument};
 
 use crate::{
+    container::Container,
     error::DockerError,
     image::Image,
     network::Network,
@@ -133,7 +134,7 @@ where
                 Some(Resource::Image(state)) => {
                     let image = Image::from(state);
 
-                    service.nodes.add_node_sync(
+                    service.nodes.add_node_sync::<_, &str>(
                         id,
                         |id, node_idx| {
                             Ok(Node::with_state(id, node_idx, State::Stored(image.into())))
@@ -144,7 +145,7 @@ where
                 Some(Resource::Volume(state)) => {
                     let volume = Volume::from(state);
 
-                    service.nodes.add_node_sync(
+                    service.nodes.add_node_sync::<_, &str>(
                         id,
                         |id, node_idx| {
                             Ok(Node::with_state(id, node_idx, State::Stored(volume.into())))
@@ -155,7 +156,7 @@ where
                 Some(Resource::Network(state)) => {
                     let network = Network::from(state);
 
-                    service.nodes.add_node_sync(
+                    service.nodes.add_node_sync::<_, &str>(
                         id,
                         |id, node_idx| {
                             Ok(Node::with_state(
@@ -167,10 +168,25 @@ where
                         &[],
                     )?;
                 }
+                Some(Resource::Container(state)) => {
+                    let container = Container::from(state);
+
+                    service.nodes.add_node_sync(
+                        id,
+                        |id, node_idx| {
+                            Ok(Node::with_state(
+                                id,
+                                node_idx,
+                                State::Stored(container.into()),
+                            ))
+                        },
+                        &value.deps,
+                    )?;
+                }
                 None => {
                     debug!("add missing resource");
 
-                    service.nodes.add_node_sync(
+                    service.nodes.add_node_sync::<_, &str>(
                         id,
                         |id, node_idx| Ok(Node::new(id, node_idx)),
                         &[],
@@ -226,7 +242,7 @@ where
 
                     let mut node = Node::new(id, idx);
 
-                    node.store(store, device, image).await?;
+                    node.store(store, device, image, &[]).await?;
 
                     Ok(node)
                 },
@@ -256,7 +272,7 @@ where
 
                     let mut node = Node::new(id, idx);
 
-                    node.store(store, device, image).await?;
+                    node.store(store, device, image, &[]).await?;
 
                     Ok(node)
                 },
@@ -286,7 +302,7 @@ where
 
                     let mut node = Node::new(id, idx);
 
-                    node.store(store, device, image).await?;
+                    node.store(store, device, image, &[]).await?;
 
                     Ok(node)
                 },
