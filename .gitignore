@@ -21,3 +21,7 @@ target/
 
 # Local coverage file
 tarpaulin-report.html
+
+/result
+.envrc
+.direnv/
