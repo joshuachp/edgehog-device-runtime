@@ -20,6 +20,7 @@ members = [
   "e2e-test-forwarder",
   "edgehog-device-runtime-containers",
   "edgehog-device-runtime-forwarder",
+  "edgehog-device-runtime-store",
   "hardware-id-service",
   "led-manager-service",
 ]
@@ -103,6 +104,7 @@ bytes = "1.8.0"
 cfg-if = "1.0.0"
 clap = "=4.4.18"
 color-eyre = "0.6.3"
+diesel = "2.2.5"
 displaydoc = "0.2.5"
 edgehog-containers = { package = "edgehog-device-runtime-containers", path = "./edgehog-device-runtime-containers", version = "=0.1.0" }
 edgehog-device-forwarder-proto = "0.1.0"
