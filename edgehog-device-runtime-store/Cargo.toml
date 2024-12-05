@@ -7,4 +7,8 @@ rust-version.workspace = true
 
 [dependencies]
 diesel = { workspace = true, features = ["sqlite", "uuid"] }
+diesel_migrations = { workspace = true, features = ["sqlite"] }
+displaydoc = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 uuid = { workspace = true }

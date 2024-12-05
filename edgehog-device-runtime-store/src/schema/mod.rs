@@ -16,16 +16,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-#![warn(
-    missing_docs,
-    rustdoc::missing_crate_level_docs,
-    clippy::dbg_macro,
-    clippy::todo
-)]
+//! Database schema definitions
 
-//! Separate crate for the database definitions
+pub mod containers;
 
-pub mod converions;
-pub mod db;
-pub mod models;
-pub mod schema;
+/// Embedded migrations
+pub const MIGRATIONS: diesel_migrations::EmbeddedMigrations =
+    diesel_migrations::embed_migrations!("migrations");
