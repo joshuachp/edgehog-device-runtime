@@ -23,7 +23,18 @@
     clippy::todo
 )]
 
+//! Separate crate for the database definitions
+
 pub mod converions;
+pub mod db;
 pub mod models;
-pub mod schema;
-pub mod store;
+
+pub mod schema {
+    //! Database schema definitions
+
+    /// Embedded migrations
+    pub const MIGRATIONS: diesel_migrations::EmbeddedMigrations =
+        diesel_migrations::embed_migrations!("migrations");
+
+    include!("../src/schema.rs");
+}
