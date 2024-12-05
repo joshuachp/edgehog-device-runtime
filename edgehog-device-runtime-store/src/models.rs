@@ -34,7 +34,7 @@ use crate::converions::SqlUuid;
 
 /// Container image with the authentication to pull it.
 #[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::images)]
+#[diesel(table_name = crate::schema::containers::images)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct Image {
     /// Unique id received from Edgehog.
@@ -53,7 +53,7 @@ pub struct Image {
 
 /// Container network with driver configuration.
 #[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::networks)]
+#[diesel(table_name = crate::schema::containers::networks)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct Network {
     /// Unique id received from Edgehog.
@@ -72,7 +72,7 @@ pub struct Network {
 
 /// Container network with driver configuration.
 #[derive(Insertable, Queryable, Associations, Selectable)]
-#[diesel(table_name = crate::schema::network_driver_opts)]
+#[diesel(table_name = crate::schema::containers::network_driver_opts)]
 #[diesel(belongs_to(Network))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct NetworkDriverOpts {
@@ -86,7 +86,7 @@ pub struct NetworkDriverOpts {
 
 /// Container volume with driver configuration.
 #[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::volumes)]
+#[diesel(table_name = crate::schema::containers::volumes)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct Volume {
     /// Unique id received from Edgehog.
@@ -99,7 +99,7 @@ pub struct Volume {
 
 /// Container volume with driver configuration.
 #[derive(Insertable, Queryable, Associations, Selectable)]
-#[diesel(table_name = crate::schema::volume_driver_opts)]
+#[diesel(table_name = crate::schema::containers::volume_driver_opts)]
 #[diesel(belongs_to(Volume))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct VolumeDriverOpts {
@@ -113,7 +113,7 @@ pub struct VolumeDriverOpts {
 
 /// Container configuration.
 #[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::containers)]
+#[diesel(table_name = crate::schema::containers::containers)]
 #[diesel(belongs_to(Image))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct Container {
@@ -203,7 +203,7 @@ where
 
 /// Missing image for a container
 #[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::container_missing_images)]
+#[diesel(table_name = crate::schema::containers::container_missing_images)]
 #[diesel(belongs_to(Container))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ContainerMissingImage {
@@ -215,7 +215,7 @@ pub struct ContainerMissingImage {
 
 /// Networks used by a container
 #[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::container_networks)]
+#[diesel(table_name = crate::schema::containers::container_networks)]
 #[diesel(belongs_to(Container))]
 #[diesel(belongs_to(Network))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -228,7 +228,7 @@ pub struct ContainerNetwork {
 
 /// Missing image for a container
 #[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::container_missing_networks)]
+#[diesel(table_name = crate::schema::containers::container_missing_networks)]
 #[diesel(belongs_to(Container))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ContainerMissingNetwork {
@@ -240,7 +240,7 @@ pub struct ContainerMissingNetwork {
 
 /// Volumes used by a container
 #[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::container_volumes)]
+#[diesel(table_name = crate::schema::containers::container_volumes)]
 #[diesel(belongs_to(Container))]
 #[diesel(belongs_to(Volume))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -253,7 +253,7 @@ pub struct ContainerVolume {
 
 /// Missing image for a container
 #[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::container_missing_volumes)]
+#[diesel(table_name = crate::schema::containers::container_missing_volumes)]
 #[diesel(belongs_to(Container))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ContainerMissingVolume {
@@ -265,7 +265,7 @@ pub struct ContainerMissingVolume {
 
 /// Environment variables for a container
 #[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::container_env)]
+#[diesel(table_name = crate::schema::containers::container_env)]
 #[diesel(belongs_to(Container))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ContainerEnv {
@@ -277,7 +277,7 @@ pub struct ContainerEnv {
 
 /// Bind mounts for a container
 #[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::container_binds)]
+#[diesel(table_name = crate::schema::containers::container_binds)]
 #[diesel(belongs_to(Container))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ContainerBinds {
@@ -289,7 +289,7 @@ pub struct ContainerBinds {
 
 /// Container port bindings
 #[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::container_port_bindings)]
+#[diesel(table_name = crate::schema::containers::container_port_bindings)]
 #[diesel(belongs_to(Container))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ContainerPortBinds {
@@ -305,7 +305,7 @@ pub struct ContainerPortBinds {
 
 /// Container deployment
 #[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::deployments)]
+#[diesel(table_name = crate::schema::containers::deployments)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct Deployment {
     /// Unique id received from Edgehog.
@@ -374,7 +374,7 @@ where
 
 /// Container deployment
 #[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::deployment_containers)]
+#[diesel(table_name = crate::schema::containers::deployment_containers)]
 #[diesel(belongs_to(Deployment))]
 #[diesel(belongs_to(Container))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -387,7 +387,7 @@ pub struct DeploymentContainer {
 
 /// Missing image for a container
 #[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::deployment_missing_containers)]
+#[diesel(table_name = crate::schema::containers::deployment_missing_containers)]
 #[diesel(belongs_to(DeploymentContainer))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct DeploymentMissingCOntainer {
