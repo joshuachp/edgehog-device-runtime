@@ -16,7 +16,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Container models definitions.
+//! Container models.
 
 use std::fmt::Display;
 
@@ -24,95 +24,19 @@ use diesel::{
     backend::Backend,
     deserialize::{FromSql, FromSqlRow},
     expression::AsExpression,
-    prelude::*,
     serialize::{IsNull, ToSql},
     sql_types::Integer,
     sqlite::Sqlite,
+    Associations, Insertable, Queryable, Selectable,
 };
 
-use crate::conversions::SqlUuid;
-
-/// Container image with the authentication to pull it.
-#[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::containers::images)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct Image {
-    /// Unique id received from Edgehog.
-    pub id: SqlUuid,
-    /// Image id returned by the container engine.
-    pub local_id: Option<String>,
-    /// Status of the image.
-    pub pulled: bool,
-    /// Image reference to be pulled.
-    ///
-    /// It's in the form of: `docker.io/library/postgres:15-alpine`
-    pub reference: String,
-    /// Base64 encoded JSON for the registry auth.
-    pub registry_auth: Option<String>,
-}
-
-/// Container network with driver configuration.
-#[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::containers::networks)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct Network {
-    /// Unique id received from Edgehog.
-    pub id: SqlUuid,
-    /// Network id returned by the container engine.
-    pub local_id: Option<String>,
-    /// Status of the network.
-    pub created: bool,
-    /// Driver to use for the network.
-    pub driver: String,
-    /// Mark the network as internal.
-    pub internal: bool,
-    /// Enable ipv6 for the network
-    pub enable_ipv6: bool,
-}
-
-/// Container network with driver configuration.
-#[derive(Insertable, Queryable, Associations, Selectable)]
-#[diesel(table_name = crate::schema::containers::network_driver_opts)]
-#[diesel(belongs_to(Network))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct NetworkDriverOpts {
-    /// Id of the network.
-    pub network_id: SqlUuid,
-    /// Name of the driver option
-    pub name: String,
-    /// Value of the driver option
-    pub value: Option<String>,
-}
-
-/// Container volume with driver configuration.
-#[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::containers::volumes)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct Volume {
-    /// Unique id received from Edgehog.
-    pub id: SqlUuid,
-    /// Status of the volume.
-    pub created: bool,
-    /// Driver to use for the volume.
-    pub driver: String,
-}
-
-/// Container volume with driver configuration.
-#[derive(Insertable, Queryable, Associations, Selectable)]
-#[diesel(table_name = crate::schema::containers::volume_driver_opts)]
-#[diesel(belongs_to(Volume))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct VolumeDriverOpts {
-    /// Id of the volume.
-    pub volume_id: SqlUuid,
-    /// Name of the driver option
-    pub name: String,
-    /// Value of the driver option
-    pub value: Option<String>,
-}
+use crate::{
+    conversions::SqlUuid,
+    models::containers::{image::Image, network::Network, volume::Volume},
+};
 
 /// Container configuration.
-#[derive(Insertable, Queryable, Selectable)]
+#[derive(Debug, Clone, Insertable, Queryable, Associations, Selectable)]
 #[diesel(table_name = crate::schema::containers::containers)]
 #[diesel(belongs_to(Image))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -167,12 +91,8 @@ impl From<ContainerStatus> for i32 {
     }
 }
 
-impl<B> FromSql<Integer, B> for ContainerStatus
-where
-    B: Backend,
-    i32: FromSql<Integer, B>,
-{
-    fn from_sql(bytes: <B as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+impl FromSql<Integer, Sqlite> for ContainerStatus {
+    fn from_sql(bytes: <Sqlite as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
         let value = i32::from_sql(bytes)?;
 
         match value {
@@ -202,7 +122,7 @@ where
 }
 
 /// Missing image for a container
-#[derive(Insertable, Queryable, Selectable)]
+#[derive(Debug, Clone, Copy, Insertable, Queryable, Associations, Selectable)]
 #[diesel(table_name = crate::schema::containers::container_missing_images)]
 #[diesel(belongs_to(Container))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -214,7 +134,7 @@ pub struct ContainerMissingImage {
 }
 
 /// Networks used by a container
-#[derive(Insertable, Queryable, Selectable)]
+#[derive(Debug, Clone, Copy, Insertable, Queryable, Associations, Selectable)]
 #[diesel(table_name = crate::schema::containers::container_networks)]
 #[diesel(belongs_to(Container))]
 #[diesel(belongs_to(Network))]
@@ -227,7 +147,7 @@ pub struct ContainerNetwork {
 }
 
 /// Missing image for a container
-#[derive(Insertable, Queryable, Selectable)]
+#[derive(Debug, Clone, Copy, Insertable, Queryable, Associations, Selectable)]
 #[diesel(table_name = crate::schema::containers::container_missing_networks)]
 #[diesel(belongs_to(Container))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -238,8 +158,22 @@ pub struct ContainerMissingNetwork {
     pub network_id: SqlUuid,
 }
 
+impl From<ContainerNetwork> for ContainerMissingNetwork {
+    fn from(
+        ContainerNetwork {
+            container_id,
+            network_id,
+        }: ContainerNetwork,
+    ) -> Self {
+        Self {
+            container_id,
+            network_id,
+        }
+    }
+}
+
 /// Volumes used by a container
-#[derive(Insertable, Queryable, Selectable)]
+#[derive(Debug, Clone, Copy, Insertable, Queryable, Associations, Selectable)]
 #[diesel(table_name = crate::schema::containers::container_volumes)]
 #[diesel(belongs_to(Container))]
 #[diesel(belongs_to(Volume))]
@@ -252,7 +186,7 @@ pub struct ContainerVolume {
 }
 
 /// Missing image for a container
-#[derive(Insertable, Queryable, Selectable)]
+#[derive(Debug, Clone, Copy, Insertable, Queryable, Associations, Selectable)]
 #[diesel(table_name = crate::schema::containers::container_missing_volumes)]
 #[diesel(belongs_to(Container))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -263,8 +197,22 @@ pub struct ContainerMissingVolume {
     pub volume_id: SqlUuid,
 }
 
+impl From<ContainerVolume> for ContainerMissingVolume {
+    fn from(
+        ContainerVolume {
+            container_id,
+            volume_id,
+        }: ContainerVolume,
+    ) -> Self {
+        Self {
+            container_id,
+            volume_id,
+        }
+    }
+}
+
 /// Environment variables for a container
-#[derive(Insertable, Queryable, Selectable)]
+#[derive(Debug, Clone, Insertable, Queryable, Associations, Selectable)]
 #[diesel(table_name = crate::schema::containers::container_env)]
 #[diesel(belongs_to(Container))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -276,7 +224,7 @@ pub struct ContainerEnv {
 }
 
 /// Bind mounts for a container
-#[derive(Insertable, Queryable, Selectable)]
+#[derive(Debug, Clone, Insertable, Queryable, Associations, Selectable)]
 #[diesel(table_name = crate::schema::containers::container_binds)]
 #[diesel(belongs_to(Container))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -288,7 +236,7 @@ pub struct ContainerBinds {
 }
 
 /// Container port bindings
-#[derive(Insertable, Queryable, Selectable)]
+#[derive(Debug, Clone, Insertable, Queryable, Associations, Selectable)]
 #[diesel(table_name = crate::schema::containers::container_port_bindings)]
 #[diesel(belongs_to(Container))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -301,98 +249,4 @@ pub struct ContainerPortBinds {
     pub host_ip: Option<String>,
     /// Host port to map the port to
     pub host_port: Option<String>,
-}
-
-/// Container deployment
-#[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::containers::deployments)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct Deployment {
-    /// Unique id received from Edgehog.
-    pub id: SqlUuid,
-    /// Status of the deployment.
-    pub status: DeploymentStatus,
-}
-
-/// Status of a deployment.
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, FromSqlRow, AsExpression)]
-#[diesel(sql_type = Integer)]
-pub enum DeploymentStatus {
-    /// Received from Edgehog.
-    Stopped = 0,
-    /// Stopped or exited.
-    Started = 1,
-}
-
-impl Display for DeploymentStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DeploymentStatus::Stopped => write!(f, "Stopped"),
-            DeploymentStatus::Started => write!(f, "Started"),
-        }
-    }
-}
-
-impl From<DeploymentStatus> for i32 {
-    fn from(value: DeploymentStatus) -> Self {
-        (value as u8).into()
-    }
-}
-
-impl<B> FromSql<Integer, B> for DeploymentStatus
-where
-    B: Backend,
-    i32: FromSql<Integer, B>,
-{
-    fn from_sql(bytes: <B as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
-        let value = i32::from_sql(bytes)?;
-
-        match value {
-            0 => Ok(DeploymentStatus::Started),
-            3 => Ok(DeploymentStatus::Stopped),
-            _ => Err(format!("unrecognized deployment status {value}").into()),
-        }
-    }
-}
-
-impl ToSql<Integer, Sqlite> for DeploymentStatus
-where
-    i32: ToSql<Integer, Sqlite>,
-{
-    fn to_sql<'b>(
-        &'b self,
-        out: &mut diesel::serialize::Output<'b, '_, Sqlite>,
-    ) -> diesel::serialize::Result {
-        let val = i32::from(*self);
-
-        out.set_value(val);
-
-        Ok(IsNull::No)
-    }
-}
-
-/// Container deployment
-#[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::containers::deployment_containers)]
-#[diesel(belongs_to(Deployment))]
-#[diesel(belongs_to(Container))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct DeploymentContainer {
-    /// [`Deployment`] id
-    pub deployment_id: SqlUuid,
-    /// [`Container`] id
-    pub container_id: SqlUuid,
-}
-
-/// Missing image for a container
-#[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::containers::deployment_missing_containers)]
-#[diesel(belongs_to(DeploymentContainer))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct DeploymentMissingCContainer {
-    /// [`Deployment`] id
-    pub deployment_id: SqlUuid,
-    /// [`Container`] id
-    pub container_id: SqlUuid,
 }
