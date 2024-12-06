@@ -40,6 +40,7 @@ use crate::service::{collection::NodeGraph, node::Node, resource::NodeType, Id};
 use crate::volume::Volume;
 
 pub(crate) mod container;
+pub(crate) mod db;
 pub(crate) mod image;
 pub(crate) mod network;
 pub(crate) mod volume;

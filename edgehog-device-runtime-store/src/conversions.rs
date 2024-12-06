@@ -26,6 +26,7 @@ use diesel::{
     expression::AsExpression,
     serialize::ToSql,
     sql_types::Binary,
+    sqlite::Sqlite,
 };
 use uuid::Uuid;
 
@@ -60,27 +61,21 @@ impl Display for SqlUuid {
     }
 }
 
-impl<B> FromSql<Binary, B> for SqlUuid
-where
-    B: Backend,
-    Vec<u8>: FromSql<Binary, B>,
-{
-    fn from_sql(bytes: <B as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+impl FromSql<Binary, Sqlite> for SqlUuid {
+    fn from_sql(bytes: <Sqlite as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
         let data = Vec::<u8>::from_sql(bytes)?;
 
         Uuid::from_slice(&data).map(SqlUuid).map_err(Into::into)
     }
 }
 
-impl<B> ToSql<Binary, B> for SqlUuid
-where
-    B: Backend,
-    [u8; 16]: ToSql<Binary, B>,
-{
+impl ToSql<Binary, Sqlite> for SqlUuid {
     fn to_sql<'b>(
         &'b self,
-        out: &mut diesel::serialize::Output<'b, '_, B>,
+        out: &mut diesel::serialize::Output<'b, '_, Sqlite>,
     ) -> diesel::serialize::Result {
-        self.as_bytes().to_sql(out)
+        let bytes = self.as_bytes().as_slice();
+
+        <[u8] as ToSql<Binary, Sqlite>>::to_sql(bytes, out)
     }
 }
