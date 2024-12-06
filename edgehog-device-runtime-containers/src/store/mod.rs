@@ -23,6 +23,7 @@ use std::io::{self, Cursor, SeekFrom};
 use std::path::Path;
 
 use container::ContainerState;
+use edgehog_store::db;
 use image::ImageState;
 use itertools::Itertools;
 use network::NetworkState;
@@ -71,32 +72,13 @@ type Result<T> = std::result::Result<T, StateStoreError>;
 /// The file is a new line delimited JSON.
 #[derive(Debug)]
 pub struct StateStore {
-    file: BufWriter<File>,
+    handle: db::Handle,
 }
 
 impl StateStore {
-    /// Opens the file to use as store.
-    pub async fn open(file: impl AsRef<Path>) -> Result<Self> {
-        let path = file.as_ref();
-
-        if let Some(dir) = path.parent() {
-            tokio::fs::create_dir_all(dir)
-                .await
-                .map_err(StateStoreError::CreateDir)?;
-        }
-
-        let file = File::options()
-            .append(true)
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(file)
-            .await
-            .map_err(StateStoreError::Open)?;
-
-        Ok(Self {
-            file: BufWriter::new(file),
-        })
+    /// Creates a new state store
+    pub fn new(handle: db::Handle) -> Self {
+        Self { handle }
     }
 
     /// Load the state from the persistence

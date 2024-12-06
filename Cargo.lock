@@ -1251,6 +1251,7 @@ dependencies = [
  "bollard",
  "cfg-if",
  "displaydoc",
+ "edgehog-device-runtime-store",
  "eyre",
  "futures",
  "hyper 1.5.0",
