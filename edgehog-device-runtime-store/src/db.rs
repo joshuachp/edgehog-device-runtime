@@ -33,10 +33,8 @@ use diesel_migrations::MigrationHarness;
 use tokio::{sync::Mutex, task::JoinError};
 use tracing::warn;
 
-use crate::schema::MIGRATIONS;
-
 type DynError = Box<dyn Error + Send + Sync>;
-type Result<T> = std::result::Result<T, HandleError>;
+pub(crate) type Result<T> = std::result::Result<T, HandleError>;
 
 /// Handler error
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
@@ -75,8 +73,9 @@ impl Handle {
         let mut writer = Self::establish(db_file)?;
 
         let writer = tokio::task::spawn_blocking(move || -> Result<SqliteConnection> {
+            #[cfg(feature = "containers")]
             writer
-                .run_pending_migrations(MIGRATIONS)
+                .run_pending_migrations(crate::schema::CONTAINER_MIGRATIONS)
                 .map_err(HandleError::Migrations)?;
 
             Ok(writer)

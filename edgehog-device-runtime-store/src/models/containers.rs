@@ -16,7 +16,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Models for all the resources.
+//! Container models definitions.
 
 use std::fmt::Display;
 

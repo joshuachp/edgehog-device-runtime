@@ -16,12 +16,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Database schema definitions
+//! Models for all the resources.
 
 #[cfg(feature = "containers")]
-pub(crate) mod containers;
-
-/// Embedded migrations
-#[cfg(feature = "containers")]
-pub(crate) const CONTAINER_MIGRATIONS: diesel_migrations::EmbeddedMigrations =
-    diesel_migrations::embed_migrations!("migrations/containers");
+pub mod containers;
