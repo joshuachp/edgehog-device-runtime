@@ -18,15 +18,12 @@
 
 //! Structure to store the state of the docker service
 
-use std::{
-    error::Error,
-    fmt::Debug,
-    sync::{Arc, Mutex},
-};
+use std::{error::Error, fmt::Debug, sync::Arc};
 
-use diesel::{Connection, ConnectionError, SqliteConnection};
+use diesel::{connection::Instrumentation, Connection, ConnectionError, SqliteConnection};
 use diesel_migrations::MigrationHarness;
-use tokio::task::JoinError;
+use tokio::{sync::Mutex, task::JoinError};
+use tracing::{span, trace, trace_span, warn};
 
 use crate::schema::MIGRATIONS;
 
@@ -54,56 +51,113 @@ pub enum HandleError {
 pub struct Handle {
     db_file: String,
     /// Write handle to the database
-    pub write: Arc<Mutex<SqliteConnection>>,
+    pub writer: Arc<Mutex<SqliteConnection>>,
     /// Per task/thread reader
-    // NOTE: consider using a pool of connection if needed by more threads.
-    pub read: SqliteConnection,
+    // NOTE: this is needed because the connection isn't Sync, and we need to pass the Connection
+    //       to another thread (for tokio). The option signal if the connection was invalidated by
+    //       the inner task panicking. In that case we re-create the reader connection.
+    pub reader: Option<Box<SqliteConnection>>,
 }
 
 impl Handle {
     /// Create a new instance by connecting to the file
     pub async fn open(db_file: &str) -> Result<Self> {
+        let mut writer = Self::establish(db_file, true)?;
+
+        let writer = tokio::task::spawn_blocking(move || -> Result<SqliteConnection> {
+            writer
+                .run_pending_migrations(MIGRATIONS)
+                .map_err(HandleError::Migrations)?;
+
+            Ok(writer)
+        })
+        .await??;
+
+        let writer = Arc::new(Mutex::new(writer));
+        let reader = Self::establish(db_file, false)?;
+
+        Ok(Self {
+            db_file: db_file.to_string(),
+            writer,
+            reader: Some(Box::new(reader)),
+        })
+    }
+
+    fn establish(db_file: &str, writer: bool) -> Result<SqliteConnection> {
         let mut connection =
             SqliteConnection::establish(db_file).map_err(|err| HandleError::Connection {
                 db_file: db_file.to_string(),
                 backtrace: err,
             })?;
 
-        let connection = tokio::task::spawn_blocking(move || -> Result<SqliteConnection> {
-            connection
-                .run_pending_migrations(MIGRATIONS)
-                .map_err(HandleError::Migrations)?;
+        struct TracingInstrument {
+            writer: bool,
+        }
 
-            Ok(connection)
-        })
-        .await??;
+        impl Instrumentation for TracingInstrument {
+            fn on_connection_event(&mut self, event: diesel::connection::InstrumentationEvent<'_>) {
+                // Simple debug of the event
+                trace!(?event, writer = self.writer);
+            }
+        }
 
-        let write = Arc::new(Mutex::new(connection));
-        let read = SqliteConnection::establish(db_file).map_err(|err| HandleError::Connection {
-            db_file: db_file.to_string(),
-            backtrace: err,
-        })?;
+        connection.set_instrumentation(TracingInstrument { writer });
 
-        Ok(Self {
-            db_file: db_file.to_string(),
-            write,
-            read,
-        })
+        Ok(connection)
     }
 
     /// Create a new handle for the store
     pub fn clone_handle(&self) -> Result<Self> {
-        let read =
-            SqliteConnection::establish(&self.db_file).map_err(|err| HandleError::Connection {
-                db_file: self.db_file.to_string(),
-                backtrace: err,
-            })?;
+        let reader = Self::establish(&self.db_file, false)?;
 
         Ok(Self {
             db_file: self.db_file.clone(),
-            write: Arc::clone(&self.write),
-            read,
+            writer: Arc::clone(&self.writer),
+            reader: Some(Box::new(reader)),
         })
+    }
+
+    /// Passes the reader to a callback to execute a query.
+    pub async fn for_read<F, O>(&mut self, f: F) -> Result<O>
+    where
+        F: FnOnce(&mut SqliteConnection) -> Result<O> + Send + 'static,
+        O: Send + 'static,
+    {
+        // Take
+        let mut reader = match self.reader.take() {
+            Some(reader) => reader,
+            None => {
+                warn!(
+                    "conneciton misisng task probably panicked, establising a new one to {}",
+                    self.db_file
+                );
+
+                Self::establish(&self.db_file, false).map(Box::new)?
+            }
+        };
+
+        // If this task panics (the error is returned) the connection would still be null
+        let (reader, res) = tokio::task::spawn_blocking(move || {
+            let res = (f)(&mut reader);
+
+            (reader, res)
+        })
+        .await?;
+
+        self.reader = Some(reader);
+
+        res
+    }
+
+    /// Passes the writer to a callback to execute an insert, update or delete.
+    pub async fn for_write<F, O>(&self, f: F) -> Result<O>
+    where
+        F: FnOnce(&mut SqliteConnection) -> Result<O> + Send + 'static,
+        O: Send + 'static,
+    {
+        let mut writer = Arc::clone(&self.writer).lock_owned().await;
+
+        tokio::task::spawn_blocking(move || (f)(&mut writer)).await?
     }
 }
 

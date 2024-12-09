@@ -11,4 +11,5 @@ diesel_migrations = { workspace = true, features = ["sqlite"] }
 displaydoc = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+tracing = { workspace = true }
 uuid = { workspace = true }
