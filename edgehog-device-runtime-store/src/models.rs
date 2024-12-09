@@ -30,7 +30,7 @@ use diesel::{
     sqlite::Sqlite,
 };
 
-use crate::converions::SqlUuid;
+use crate::conversions::SqlUuid;
 
 /// Container image with the authentication to pull it.
 #[derive(Insertable, Queryable, Selectable)]
@@ -390,7 +390,7 @@ pub struct DeploymentContainer {
 #[diesel(table_name = crate::schema::containers::deployment_missing_containers)]
 #[diesel(belongs_to(DeploymentContainer))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct DeploymentMissingCOntainer {
+pub struct DeploymentMissingCContainer {
     /// [`Deployment`] id
     pub deployment_id: SqlUuid,
     /// [`Container`] id
