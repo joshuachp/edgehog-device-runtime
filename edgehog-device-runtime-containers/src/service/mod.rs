@@ -283,11 +283,11 @@ impl<D> Service<D> {
     where
         D: Client + Sync + 'static,
     {
-        let id = Id::try_from_str(ResourceType::Container, &req.id)?;
+        let id = Id::new(ResourceType::Container, *req.id);
 
         debug!("creating container with id {id}");
 
-        let deps = req.dependencies()?;
+        let deps = req.dependencies();
 
         let container = Container::try_from(req)?;
 
@@ -302,15 +302,15 @@ impl<D> Service<D> {
     where
         D: Client + Sync + 'static,
     {
-        let id = Id::try_from_str(ResourceType::Deployment, &req.id)?;
+        let id = Id::new(ResourceType::Deployment, *req.id);
 
         debug!("creating deployment with id {id}");
 
         let deps: Vec<Id> = req
             .containers
             .iter()
-            .map(|id| Id::try_from_str(ResourceType::Container, id))
-            .try_collect()?;
+            .map(|id| Id::new(ResourceType::Container, **id))
+            .collect();
 
         self.create(id, deps, NodeType::Deployment).await?;
 
@@ -1160,8 +1160,12 @@ mod tests {
 
         let image_req = ContainerRequest::from_event(create_image_req).unwrap();
 
-        let create_container_req =
-            create_container_request_event(container_id, &image_id.to_string(), reference, &[]);
+        let create_container_req = create_container_request_event(
+            container_id,
+            &image_id.to_string(),
+            reference,
+            &Vec::<Uuid>::new(),
+        );
 
         let container_req = ContainerRequest::from_event(create_container_req).unwrap();
 
