@@ -34,7 +34,8 @@ use tokio::{sync::Mutex, task::JoinError};
 use tracing::warn;
 
 type DynError = Box<dyn Error + Send + Sync>;
-pub(crate) type Result<T> = std::result::Result<T, HandleError>;
+/// Result for the [`HandleError`] returned by the [`Handle`].
+pub type Result<T> = std::result::Result<T, HandleError>;
 
 /// Handler error
 #[derive(Debug, thiserror::Error, displaydoc::Display)]

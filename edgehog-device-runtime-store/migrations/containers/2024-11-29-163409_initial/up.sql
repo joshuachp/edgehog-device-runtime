@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS images (
     id BLOB PRIMARY KEY NOT NULL,
     local_id TEXT,
-    pulled BOOLEAN NOT NULL,
+    status INTEGER NOT NULL,
     reference TEXT NOT NULL,
     registry_auth TEXT
 );
@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS images (
 CREATE TABLE IF NOT EXISTS networks (
     id BLOB PRIMARY KEY NOT NULL,
     local_id TEXT,
-    created BOOLEAN NOT NULL,
+    status INTEGER NOT NULL,
     name TEXT NOT NULL,
     driver TEXT NOT NULL,
     internal BOOLEAN NOT NULL,
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS network_driver_opts (
 
 CREATE TABLE IF NOT EXISTS volumes (
     id BLOB PRIMARY KEY NOT NULL,
-    created BOOLEAN NOT NULL,
+    status INTEGER NOT NULL,
     name TEXT NOT NULL,
     driver TEXT NOT NULL
 );
@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS container_port_bindings (
     ) ON DELETE CASCADE ON UPDATE CASCADE,
     port TEXT NOT NULL,
     host_ip TEXT,
-    host_port TEXT,
+    host_port INTEGER,
     PRIMARY KEY (container_id, port, host_ip, host_port)
 );
 

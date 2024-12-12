@@ -47,20 +47,29 @@ pub struct Deployment {
 
 /// Status of a deployment.
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, FromSqlRow, AsExpression)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, FromSqlRow, AsExpression,
+)]
 #[diesel(sql_type = Integer)]
 pub enum DeploymentStatus {
     /// Received from Edgehog.
-    Stopped = 0,
-    /// Stopped or exited.
-    Started = 1,
+    #[default]
+    Received = 0,
+    /// The deployment was acknowledged
+    Published = 1,
+    /// Up and running.
+    Started = 2,
+    /// Was stopped.
+    Stopped = 3,
 }
 
 impl Display for DeploymentStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DeploymentStatus::Stopped => write!(f, "Stopped"),
+            DeploymentStatus::Received => write!(f, "Received"),
+            DeploymentStatus::Published => write!(f, "Published"),
             DeploymentStatus::Started => write!(f, "Started"),
+            DeploymentStatus::Stopped => write!(f, "Stopped"),
         }
     }
 }
@@ -71,22 +80,29 @@ impl From<DeploymentStatus> for i32 {
     }
 }
 
-impl FromSql<Integer, Sqlite> for DeploymentStatus {
-    fn from_sql(bytes: <Sqlite as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
-        let value = i32::from_sql(bytes)?;
+impl TryFrom<i32> for DeploymentStatus {
+    type Error = String;
 
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(DeploymentStatus::Started),
+            0 => Ok(DeploymentStatus::Received),
+            1 => Ok(DeploymentStatus::Published),
+            2 => Ok(DeploymentStatus::Started),
             3 => Ok(DeploymentStatus::Stopped),
-            _ => Err(format!("unrecognized deployment status {value}").into()),
+            _ => Err(format!("unrecognized status value {value}")),
         }
     }
 }
 
-impl ToSql<Integer, Sqlite> for DeploymentStatus
-where
-    i32: ToSql<Integer, Sqlite>,
-{
+impl FromSql<Integer, Sqlite> for DeploymentStatus {
+    fn from_sql(bytes: <Sqlite as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+        let value = i32::from_sql(bytes)?;
+
+        Self::try_from(value).map_err(Into::into)
+    }
+}
+
+impl ToSql<Integer, Sqlite> for DeploymentStatus {
     fn to_sql<'b>(
         &'b self,
         out: &mut diesel::serialize::Output<'b, '_, Sqlite>,
@@ -122,4 +138,27 @@ pub struct DeploymentMissingCContainer {
     pub deployment_id: SqlUuid,
     /// [`Container`] id
     pub container_id: SqlUuid,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DeploymentStatus;
+
+    #[test]
+    fn should_convert_status() {
+        let variants = [
+            DeploymentStatus::Received,
+            DeploymentStatus::Published,
+            DeploymentStatus::Started,
+            DeploymentStatus::Stopped,
+        ];
+
+        for exp in variants {
+            let val = i32::from(exp);
+
+            let status = DeploymentStatus::try_from(val).unwrap();
+
+            assert_eq!(status, exp);
+        }
+    }
 }
