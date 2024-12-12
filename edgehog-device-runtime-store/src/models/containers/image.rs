@@ -18,9 +18,18 @@
 
 //! Container image models.
 
+use std::fmt::Display;
+
 use diesel::{
+    backend::Backend,
+    deserialize::{FromSql, FromSqlRow},
     dsl::{exists, BareSelect, Eq, Filter},
-    select, ExpressionMethods, Insertable, QueryDsl, Queryable, Selectable,
+    expression::AsExpression,
+    select,
+    serialize::{IsNull, ToSql},
+    sql_types::Integer,
+    sqlite::Sqlite,
+    ExpressionMethods, Insertable, QueryDsl, Queryable, Selectable,
 };
 
 use crate::{conversions::SqlUuid, schema::containers::images};
@@ -36,7 +45,7 @@ pub struct Image {
     /// Image id returned by the container engine.
     pub local_id: Option<String>,
     /// Status of the image.
-    pub pulled: bool,
+    pub status: ImageStatus,
     /// Image reference to be pulled.
     ///
     /// It's in the form of: `docker.io/library/postgres:15-alpine`
@@ -63,5 +72,93 @@ impl Image {
     /// Returns the image exists query.
     pub fn exists(id: &SqlUuid) -> ImageExists<'_> {
         select(exists(Self::find_id(id)))
+    }
+}
+
+/// Status of an image.
+#[repr(u8)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, FromSqlRow, AsExpression,
+)]
+#[diesel(sql_type = Integer)]
+pub enum ImageStatus {
+    /// Received from Edgehog.
+    #[default]
+    Received = 0,
+    /// The image was acknowledged
+    Published = 1,
+    /// Created on the runtime.
+    Pulled = 2,
+}
+
+impl Display for ImageStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ImageStatus::Received => write!(f, "Received"),
+            ImageStatus::Published => write!(f, "Published"),
+            ImageStatus::Pulled => write!(f, "Pulled"),
+        }
+    }
+}
+
+impl From<ImageStatus> for i32 {
+    fn from(value: ImageStatus) -> Self {
+        (value as u8).into()
+    }
+}
+
+impl TryFrom<i32> for ImageStatus {
+    type Error = String;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(ImageStatus::Received),
+            1 => Ok(ImageStatus::Published),
+            2 => Ok(ImageStatus::Pulled),
+            _ => Err(format!("unrecognized status value {value}")),
+        }
+    }
+}
+
+impl FromSql<Integer, Sqlite> for ImageStatus {
+    fn from_sql(bytes: <Sqlite as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+        let value = i32::from_sql(bytes)?;
+
+        Self::try_from(value).map_err(Into::into)
+    }
+}
+
+impl ToSql<Integer, Sqlite> for ImageStatus {
+    fn to_sql<'b>(
+        &'b self,
+        out: &mut diesel::serialize::Output<'b, '_, Sqlite>,
+    ) -> diesel::serialize::Result {
+        let val = i32::from(*self);
+
+        out.set_value(val);
+
+        Ok(IsNull::No)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ImageStatus;
+
+    #[test]
+    fn should_convert_status() {
+        let variants = [
+            ImageStatus::Received,
+            ImageStatus::Published,
+            ImageStatus::Pulled,
+        ];
+
+        for exp in variants {
+            let val = i32::from(exp);
+
+            let status = ImageStatus::try_from(val).unwrap();
+
+            assert_eq!(status, exp);
+        }
     }
 }

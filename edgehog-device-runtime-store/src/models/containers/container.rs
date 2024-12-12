@@ -18,7 +18,7 @@
 
 //! Container models.
 
-use std::fmt::Display;
+use std::{fmt::Display, ops::Deref};
 
 use diesel::{
     backend::Backend,
@@ -61,23 +61,29 @@ pub struct Container {
 
 /// Status of a container.
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, FromSqlRow, AsExpression)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, FromSqlRow, AsExpression,
+)]
 #[diesel(sql_type = Integer)]
 pub enum ContainerStatus {
     /// Received from Edgehog.
+    #[default]
     Received = 0,
+    /// The container was acknowledged
+    Published = 1,
     /// Created on the runtime.
-    Created = 1,
+    Created = 2,
     /// Up and running.
-    Running = 2,
+    Running = 3,
     /// Stopped or exited.
-    Stopped = 3,
+    Stopped = 4,
 }
 
 impl Display for ContainerStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ContainerStatus::Received => write!(f, "Received"),
+            ContainerStatus::Published => write!(f, "Published"),
             ContainerStatus::Created => write!(f, "Created"),
             ContainerStatus::Running => write!(f, "Running"),
             ContainerStatus::Stopped => write!(f, "Stopped"),
@@ -91,24 +97,30 @@ impl From<ContainerStatus> for i32 {
     }
 }
 
-impl FromSql<Integer, Sqlite> for ContainerStatus {
-    fn from_sql(bytes: <Sqlite as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
-        let value = i32::from_sql(bytes)?;
+impl TryFrom<i32> for ContainerStatus {
+    type Error = String;
 
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(ContainerStatus::Received),
-            1 => Ok(ContainerStatus::Created),
-            2 => Ok(ContainerStatus::Running),
-            3 => Ok(ContainerStatus::Stopped),
-            _ => Err(format!("unrecognized container status {value}").into()),
+            1 => Ok(ContainerStatus::Published),
+            2 => Ok(ContainerStatus::Created),
+            3 => Ok(ContainerStatus::Running),
+            4 => Ok(ContainerStatus::Stopped),
+            _ => Err(format!("unrecognized status value {value}")),
         }
     }
 }
 
-impl ToSql<Integer, Sqlite> for ContainerStatus
-where
-    i32: ToSql<Integer, Sqlite>,
-{
+impl FromSql<Integer, Sqlite> for ContainerStatus {
+    fn from_sql(bytes: <Sqlite as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+        let value = i32::from_sql(bytes)?;
+
+        Self::try_from(value).map_err(Into::into)
+    }
+}
+
+impl ToSql<Integer, Sqlite> for ContainerStatus {
     fn to_sql<'b>(
         &'b self,
         out: &mut diesel::serialize::Output<'b, '_, Sqlite>,
@@ -248,5 +260,63 @@ pub struct ContainerPortBinds {
     /// Host IP to map the port to
     pub host_ip: Option<String>,
     /// Host port to map the port to
-    pub host_port: Option<String>,
+    pub host_port: Option<HostPort>,
+}
+
+/// Wrapper to a [`u16`] to be inserted into the database
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, FromSqlRow, AsExpression)]
+#[diesel(sql_type = Integer)]
+pub struct HostPort(pub u16);
+
+impl Deref for HostPort {
+    type Target = u16;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl FromSql<Integer, Sqlite> for HostPort {
+    fn from_sql(bytes: <Sqlite as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+        let value = i32::from_sql(bytes)?;
+
+        u16::try_from(value).map(HostPort).map_err(Into::into)
+    }
+}
+
+impl ToSql<Integer, Sqlite> for HostPort {
+    fn to_sql<'b>(
+        &'b self,
+        out: &mut diesel::serialize::Output<'b, '_, Sqlite>,
+    ) -> diesel::serialize::Result {
+        let val = i32::from(self.0);
+
+        out.set_value(val);
+
+        Ok(IsNull::No)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ContainerStatus;
+
+    #[test]
+    fn should_convert_status() {
+        let variants = [
+            ContainerStatus::Received,
+            ContainerStatus::Published,
+            ContainerStatus::Created,
+            ContainerStatus::Running,
+            ContainerStatus::Stopped,
+        ];
+
+        for exp in variants {
+            let val = i32::from(exp);
+
+            let status = ContainerStatus::try_from(val).unwrap();
+
+            assert_eq!(status, exp);
+        }
+    }
 }
