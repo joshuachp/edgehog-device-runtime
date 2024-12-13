@@ -1,1 +1,1 @@
-INSERT OR IGNORE INTO migrations(name) VALUES (?);
+INSERT OR IGNORE INTO migrations (name) VALUES (?);

@@ -34,6 +34,7 @@ use tokio::{sync::Mutex, task::JoinError};
 use tracing::warn;
 
 mod migrations;
+mod queries;
 
 /// Result for the [`HandleError`] returned by the [`Handle`].
 pub type Result<T> = std::result::Result<T, HandleError>;
@@ -44,7 +45,7 @@ macro_rules! include_query {
     };
 }
 
-pub(crate) use include_query;
+pub(self) use include_query;
 
 /// Handler error
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
@@ -71,6 +72,8 @@ pub enum HandleError {
     },
     /// couldn't run transaction
     Transaction(#[source] rusqlite::Error),
+    /// couldn't execute query
+    Query(#[from] rusqlite::Error),
 }
 
 /// Read and write connection to the database
