@@ -18,30 +18,19 @@
 
 //! Container image models.
 
-use std::fmt::Display;
+use std::{fmt::Display, i64};
 
-use diesel::{
-    backend::Backend,
-    deserialize::{FromSql, FromSqlRow},
-    dsl::{exists, BareSelect, Eq, Filter},
-    expression::AsExpression,
-    select,
-    serialize::{IsNull, ToSql},
-    sql_types::Integer,
-    sqlite::Sqlite,
-    ExpressionMethods, Insertable, QueryDsl, Queryable, Selectable,
+use rusqlite::{
+    types::{FromSql, FromSqlError, ToSqlOutput},
+    ToSql,
 };
-
-use crate::{conversions::SqlUuid, schema::containers::images};
+use uuid::Uuid;
 
 /// Container image with the authentication to pull it.
-#[derive(Debug, Clone, Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::containers::images)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-#[diesel(treat_none_as_default_value = false)]
+#[derive(Debug, Clone)]
 pub struct Image {
     /// Unique id received from Edgehog.
-    pub id: SqlUuid,
+    pub id: Uuid,
     /// Image id returned by the container engine.
     pub local_id: Option<String>,
     /// Status of the image.
@@ -54,33 +43,9 @@ pub struct Image {
     pub registry_auth: Option<String>,
 }
 
-type ImageById<'a> = Eq<images::id, &'a SqlUuid>;
-type ImageFilterById<'a> = Filter<images::table, ImageById<'a>>;
-type ImageExists<'a> = BareSelect<exists<Filter<images::table, ImageById<'a>>>>;
-
-impl Image {
-    /// Returns the filter image table by id.
-    pub fn by_id(id: &SqlUuid) -> ImageById<'_> {
-        images::id.eq(id)
-    }
-
-    /// Returns the filtered image table by id.
-    pub fn find_id(id: &SqlUuid) -> ImageFilterById<'_> {
-        images::table.filter(Self::by_id(id))
-    }
-
-    /// Returns the image exists query.
-    pub fn exists(id: &SqlUuid) -> ImageExists<'_> {
-        select(exists(Self::find_id(id)))
-    }
-}
-
 /// Status of an image.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, FromSqlRow, AsExpression,
-)]
-#[diesel(sql_type = Integer)]
 pub enum ImageStatus {
     /// Received from Edgehog.
     #[default]
@@ -101,43 +66,36 @@ impl Display for ImageStatus {
     }
 }
 
-impl From<ImageStatus> for i32 {
+impl From<ImageStatus> for u8 {
     fn from(value: ImageStatus) -> Self {
-        (value as u8).into()
+        value as u8
     }
 }
 
-impl TryFrom<i32> for ImageStatus {
-    type Error = String;
+impl TryFrom<i64> for ImageStatus {
+    type Error = FromSqlError;
 
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(ImageStatus::Received),
             1 => Ok(ImageStatus::Published),
             2 => Ok(ImageStatus::Pulled),
-            _ => Err(format!("unrecognized status value {value}")),
+            _ => Err(FromSqlError::OutOfRange(value)),
         }
     }
 }
 
-impl FromSql<Integer, Sqlite> for ImageStatus {
-    fn from_sql(bytes: <Sqlite as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
-        let value = i32::from_sql(bytes)?;
-
-        Self::try_from(value).map_err(Into::into)
+impl FromSql for ImageStatus {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        value.as_i64().and_then(Self::try_from)
     }
 }
 
-impl ToSql<Integer, Sqlite> for ImageStatus {
-    fn to_sql<'b>(
-        &'b self,
-        out: &mut diesel::serialize::Output<'b, '_, Sqlite>,
-    ) -> diesel::serialize::Result {
-        let val = i32::from(*self);
+impl ToSql for ImageStatus {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        let value = u8::from(*self);
 
-        out.set_value(val);
-
-        Ok(IsNull::No)
+        Ok(ToSqlOutput::from(value))
     }
 }
 
@@ -154,7 +112,7 @@ mod tests {
         ];
 
         for exp in variants {
-            let val = i32::from(exp);
+            let val: i64 = u8::from(exp).into();
 
             let status = ImageStatus::try_from(val).unwrap();
 

@@ -20,28 +20,17 @@
 
 use std::fmt::Display;
 
-use diesel::{
-    backend::Backend,
-    deserialize::{FromSql, FromSqlRow},
-    dsl::{exists, BareSelect, Eq, Filter},
-    expression::AsExpression,
-    select,
-    serialize::{IsNull, ToSql},
-    sql_types::Integer,
-    sqlite::Sqlite,
-    Associations, ExpressionMethods, Insertable, QueryDsl, Queryable, Selectable,
+use rusqlite::{
+    types::{FromSql, FromSqlError, ToSqlOutput},
+    ToSql,
 };
-
-use crate::{conversions::SqlUuid, schema::containers::networks};
+use uuid::Uuid;
 
 /// Container network with driver configuration.
-#[derive(Debug, Clone, Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::containers::networks)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-#[diesel(treat_none_as_default_value = false)]
+#[derive(Debug, Clone)]
 pub struct Network {
     /// Unique id received from Edgehog.
-    pub id: SqlUuid,
+    pub id: Uuid,
     /// Network id returned by the container engine.
     pub local_id: Option<String>,
     /// Status of the network.
@@ -54,36 +43,11 @@ pub struct Network {
     pub enable_ipv6: bool,
 }
 
-type NetworkById<'a> = Eq<networks::id, &'a SqlUuid>;
-type NetworkFilterById<'a> = Filter<networks::table, NetworkById<'a>>;
-type NetworkExists<'a> = BareSelect<exists<Filter<networks::table, NetworkById<'a>>>>;
-
-impl Network {
-    /// Returns the filter network table by id.
-    pub fn by_id(id: &SqlUuid) -> NetworkById<'_> {
-        networks::id.eq(id)
-    }
-
-    /// Returns the filtered network table by id.
-    pub fn find_id(id: &SqlUuid) -> NetworkFilterById<'_> {
-        networks::table.filter(Self::by_id(id))
-    }
-
-    /// Returns the network exists query.
-    pub fn exists(id: &SqlUuid) -> NetworkExists<'_> {
-        select(exists(Self::find_id(id)))
-    }
-}
-
 /// Container network with driver configuration.
-#[derive(Debug, Clone, Insertable, Queryable, Associations, Selectable)]
-#[diesel(table_name = crate::schema::containers::network_driver_opts)]
-#[diesel(belongs_to(Network))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-#[diesel(treat_none_as_default_value = false)]
+#[derive(Debug, Clone)]
 pub struct NetworkDriverOpts {
     /// Id of the network.
-    pub network_id: SqlUuid,
+    pub network_id: Uuid,
     /// Name of the driver option
     pub name: String,
     /// Value of the driver option
@@ -91,11 +55,8 @@ pub struct NetworkDriverOpts {
 }
 
 /// Status of a network.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, FromSqlRow, AsExpression,
-)]
-#[diesel(sql_type = Integer)]
 pub enum NetworkStatus {
     /// Received from Edgehog.
     #[default]
@@ -116,43 +77,34 @@ impl Display for NetworkStatus {
     }
 }
 
-impl From<NetworkStatus> for i32 {
+impl From<NetworkStatus> for u8 {
     fn from(value: NetworkStatus) -> Self {
-        (value as u8).into()
+        value as u8
     }
 }
 
-impl TryFrom<i32> for NetworkStatus {
-    type Error = String;
+impl TryFrom<i64> for NetworkStatus {
+    type Error = FromSqlError;
 
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(NetworkStatus::Received),
             1 => Ok(NetworkStatus::Published),
             2 => Ok(NetworkStatus::Created),
-            _ => Err(format!("unrecognized status value {value}")),
+            _ => Err(FromSqlError::OutOfRange(value)),
         }
     }
 }
 
-impl FromSql<Integer, Sqlite> for NetworkStatus {
-    fn from_sql(bytes: <Sqlite as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
-        let value = i32::from_sql(bytes)?;
-
-        Self::try_from(value).map_err(Into::into)
+impl FromSql for NetworkStatus {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        value.as_i64().and_then(Self::try_from)
     }
 }
 
-impl ToSql<Integer, Sqlite> for NetworkStatus {
-    fn to_sql<'b>(
-        &'b self,
-        out: &mut diesel::serialize::Output<'b, '_, Sqlite>,
-    ) -> diesel::serialize::Result {
-        let val = i32::from(*self);
-
-        out.set_value(val);
-
-        Ok(IsNull::No)
+impl ToSql for NetworkStatus {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(u8::from(*self)))
     }
 }
 
@@ -169,7 +121,7 @@ mod tests {
         ];
 
         for exp in variants {
-            let val = i32::from(exp);
+            let val = i64::from(u8::from(exp));
 
             let status = NetworkStatus::try_from(val).unwrap();
 

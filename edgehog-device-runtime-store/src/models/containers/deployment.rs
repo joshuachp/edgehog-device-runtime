@@ -20,37 +20,24 @@
 
 use std::fmt::Display;
 
-use diesel::{
-    backend::Backend,
-    deserialize::{FromSql, FromSqlRow},
-    expression::AsExpression,
-    prelude::*,
-    serialize::{IsNull, ToSql},
-    sql_types::Integer,
-    sqlite::Sqlite,
+use rusqlite::{
+    types::{FromSql, FromSqlError, ToSqlOutput},
+    ToSql,
 };
-
-use super::container::Container;
-
-use crate::conversions::SqlUuid;
+use uuid::Uuid;
 
 /// Container deployment
-#[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::containers::deployments)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[derive(Debug, Clone, Copy)]
 pub struct Deployment {
     /// Unique id received from Edgehog.
-    pub id: SqlUuid,
+    pub id: Uuid,
     /// Status of the deployment.
     pub status: DeploymentStatus,
 }
 
 /// Status of a deployment.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, FromSqlRow, AsExpression,
-)]
-#[diesel(sql_type = Integer)]
 pub enum DeploymentStatus {
     /// Received from Edgehog.
     #[default]
@@ -74,70 +61,36 @@ impl Display for DeploymentStatus {
     }
 }
 
-impl From<DeploymentStatus> for i32 {
+impl From<DeploymentStatus> for u8 {
     fn from(value: DeploymentStatus) -> Self {
-        (value as u8).into()
+        value as u8
     }
 }
 
-impl TryFrom<i32> for DeploymentStatus {
-    type Error = String;
+impl TryFrom<i64> for DeploymentStatus {
+    type Error = FromSqlError;
 
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(DeploymentStatus::Received),
             1 => Ok(DeploymentStatus::Published),
             2 => Ok(DeploymentStatus::Started),
             3 => Ok(DeploymentStatus::Stopped),
-            _ => Err(format!("unrecognized status value {value}")),
+            _ => Err(FromSqlError::OutOfRange(value)),
         }
     }
 }
 
-impl FromSql<Integer, Sqlite> for DeploymentStatus {
-    fn from_sql(bytes: <Sqlite as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
-        let value = i32::from_sql(bytes)?;
-
-        Self::try_from(value).map_err(Into::into)
+impl FromSql for DeploymentStatus {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        value.as_i64().and_then(Self::try_from)
     }
 }
 
-impl ToSql<Integer, Sqlite> for DeploymentStatus {
-    fn to_sql<'b>(
-        &'b self,
-        out: &mut diesel::serialize::Output<'b, '_, Sqlite>,
-    ) -> diesel::serialize::Result {
-        let val = i32::from(*self);
-
-        out.set_value(val);
-
-        Ok(IsNull::No)
+impl ToSql for DeploymentStatus {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(u8::from(*self)))
     }
-}
-
-/// Container deployment
-#[derive(Debug, Clone, Copy, Insertable, Queryable, Associations, Selectable)]
-#[diesel(table_name = crate::schema::containers::deployment_containers)]
-#[diesel(belongs_to(Deployment))]
-#[diesel(belongs_to(Container))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct DeploymentContainer {
-    /// [`Deployment`] id
-    pub deployment_id: SqlUuid,
-    /// [`Container`] id
-    pub container_id: SqlUuid,
-}
-
-/// Missing image for a container
-#[derive(Debug, Clone, Copy, Insertable, Queryable, Associations, Selectable)]
-#[diesel(table_name = crate::schema::containers::deployment_missing_containers)]
-#[diesel(belongs_to(Deployment))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct DeploymentMissingCContainer {
-    /// [`Deployment`] id
-    pub deployment_id: SqlUuid,
-    /// [`Container`] id
-    pub container_id: SqlUuid,
 }
 
 #[cfg(test)]
@@ -154,7 +107,7 @@ mod tests {
         ];
 
         for exp in variants {
-            let val = i32::from(exp);
+            let val = i64::from(u8::from(exp));
 
             let status = DeploymentStatus::try_from(val).unwrap();
 
