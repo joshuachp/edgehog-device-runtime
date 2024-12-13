@@ -462,6 +462,7 @@ diesel::table! {
 
 diesel::joinable!(container_binds -> containers (container_id));
 diesel::joinable!(container_env -> containers (container_id));
+diesel::joinable!(container_missing_images -> containers (container_id));
 diesel::joinable!(container_networks -> containers (container_id));
 diesel::joinable!(container_networks -> networks (network_id));
 diesel::joinable!(container_port_bindings -> containers (container_id));

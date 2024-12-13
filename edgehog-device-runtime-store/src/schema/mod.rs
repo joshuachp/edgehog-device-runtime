@@ -25,4 +25,4 @@ pub mod containers;
 /// Embedded migrations
 #[cfg(feature = "containers")]
 pub(crate) const CONTAINER_MIGRATIONS: diesel_migrations::EmbeddedMigrations =
-    diesel_migrations::embed_migrations!("migrations/containers");
+    diesel_migrations::embed_migrations!("migrations");

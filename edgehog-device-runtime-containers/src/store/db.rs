@@ -18,8 +18,8 @@
 
 //! Persistent stores of the request issued by Astarte and resources created.
 
-use diesel::{insert_into, RunQueryDsl};
-use diesel::{Connection, Table};
+use diesel::{delete, insert_into, ExpressionMethods, RunQueryDsl};
+use diesel::{update, QueryDsl, Table};
 use edgehog_store::conversions::SqlUuid;
 use edgehog_store::models::containers::container::{
     ContainerBinds, ContainerEnv, ContainerNetwork, ContainerPortBinds, ContainerStatus,
@@ -64,11 +64,17 @@ impl StateStore {
     /// Stores the image received from the CreateRequest
     pub(crate) async fn create_image(&self, image: Image) -> Result<()> {
         self.handle
-            .for_write(|writer| {
+            .for_write_transaction(move |writer| {
                 insert_into(images::table)
-                    .values(image)
+                    .values(&image)
                     .on_conflict(images::id)
                     .do_nothing()
+                    .execute(writer)?;
+
+                containers::table.inner_join(container_missing_images::table);
+
+                delete(container_missing_images::table)
+                    .filter(container_missing_images::image_id.eq(image.id))
                     .execute(writer)?;
 
                 Ok(())
@@ -83,26 +89,22 @@ impl StateStore {
         opts: Vec<NetworkDriverOpts>,
     ) -> Result<()> {
         self.handle
-            .for_write(|writer| {
-                writer.transaction(|writer| -> Result<()> {
-                    insert_into(networks::table)
-                        .values(network)
-                        .on_conflict(networks::id)
+            .for_write_transaction(|writer| {
+                insert_into(networks::table)
+                    .values(network)
+                    .on_conflict(networks::id)
+                    .do_nothing()
+                    .execute(writer)?;
+
+                // FIXME: the on_conflict(network_driver_opts::table.primary_key()) doesn't work
+                //        with batch insert
+                for opt in opts {
+                    insert_into(network_driver_opts::table)
+                        .values(opt)
+                        .on_conflict(network_driver_opts::table.primary_key())
                         .do_nothing()
                         .execute(writer)?;
-
-                    // FIXME: the on_conflict(network_driver_opts::table.primary_key()) doesn't work
-                    //        with batch insert
-                    for opt in opts {
-                        insert_into(network_driver_opts::table)
-                            .values(opt)
-                            .on_conflict(network_driver_opts::table.primary_key())
-                            .do_nothing()
-                            .execute(writer)?;
-                    }
-
-                    Ok(())
-                })?;
+                }
 
                 Ok(())
             })
@@ -149,117 +151,114 @@ impl StateStore {
         let binds = value.binds.clone();
 
         self.handle
-            .for_write(move |writer| {
-                writer.transaction(move |writer| {
-                    let image_exists: bool = Image::exists(&image_id).get_result(writer)?;
+            .for_write_transaction(move |writer| {
+                let image_exists: bool = Image::exists(&image_id).get_result(writer)?;
 
-                    if !image_exists {
-                        debug!("image is missing, storing image_id into container_missing_images");
+                if !image_exists {
+                    debug!("image is missing, storing image_id into container_missing_images");
 
-                        insert_into(container_missing_images::table)
-                            .values(ContainerMissingImage {
-                                container_id: container.id,
-                                image_id,
-                            })
-                            .on_conflict_do_nothing()
-                            .execute(writer)?;
-
-                        container.image_id.take();
-                    }
-
-                    insert_into(containers::table)
-                        .values(&container)
-                        .on_conflict(containers::id)
-                        .do_nothing()
+                    insert_into(container_missing_images::table)
+                        .values(ContainerMissingImage {
+                            container_id: container.id,
+                            image_id,
+                        })
+                        .on_conflict_do_nothing()
                         .execute(writer)?;
 
-                    for env in envs {
-                        insert_into(container_env::table)
-                            .values(ContainerEnv {
-                                container_id: container.id,
-                                value: env,
-                            })
-                            .on_conflict_do_nothing()
-                            .execute(writer)?;
-                    }
+                    container.image_id.take();
+                }
 
-                    for bind in binds {
-                        insert_into(container_binds::table)
-                            .values(ContainerBinds {
-                                container_id: container.id,
-                                value: bind,
-                            })
-                            .on_conflict_do_nothing()
-                            .execute(writer)?;
-                    }
+                insert_into(containers::table)
+                    .values(&container)
+                    .on_conflict(containers::id)
+                    .do_nothing()
+                    .execute(writer)?;
 
-                    let iter = port_bindings
-                        .iter()
-                        .flat_map(|(port, bindings)| bindings.iter().map(move |bind| (port, bind)));
+                for env in envs {
+                    insert_into(container_env::table)
+                        .values(ContainerEnv {
+                            container_id: container.id,
+                            value: env,
+                        })
+                        .on_conflict_do_nothing()
+                        .execute(writer)?;
+                }
 
-                    for (port, bind) in iter {
-                        insert_into(container_port_bindings::table)
-                            .values(ContainerPortBinds {
-                                container_id: container.id,
-                                port: port.to_string(),
-                                host_ip: bind.host_ip.clone(),
-                                host_port: bind.host_port.map(HostPort),
-                            })
-                            .on_conflict_do_nothing()
-                            .execute(writer)?;
-                    }
+                for bind in binds {
+                    insert_into(container_binds::table)
+                        .values(ContainerBinds {
+                            container_id: container.id,
+                            value: bind,
+                        })
+                        .on_conflict_do_nothing()
+                        .execute(writer)?;
+                }
 
-                    for network_id in networks {
-                        let network_exists: bool =
-                            Network::exists(&network_id).get_result(writer)?;
+                let iter = port_bindings
+                    .iter()
+                    .flat_map(|(port, bindings)| bindings.iter().map(move |bind| (port, bind)));
 
-                        if !network_exists {
-                            insert_into(container_missing_networks::table)
-                                .values(ContainerMissingNetwork {
-                                    container_id: container.id,
-                                    network_id,
-                                })
-                                .on_conflict_do_nothing()
-                                .execute(writer)?;
+                for (port, bind) in iter {
+                    insert_into(container_port_bindings::table)
+                        .values(ContainerPortBinds {
+                            container_id: container.id,
+                            port: port.to_string(),
+                            host_ip: bind.host_ip.clone(),
+                            host_port: bind.host_port.map(HostPort),
+                        })
+                        .on_conflict_do_nothing()
+                        .execute(writer)?;
+                }
 
-                            continue;
-                        }
+                for network_id in networks {
+                    let network_exists: bool = Network::exists(&network_id).get_result(writer)?;
 
-                        insert_into(container_networks::table)
-                            .values(ContainerNetwork {
+                    if !network_exists {
+                        insert_into(container_missing_networks::table)
+                            .values(ContainerMissingNetwork {
                                 container_id: container.id,
                                 network_id,
                             })
                             .on_conflict_do_nothing()
                             .execute(writer)?;
+
+                        continue;
                     }
 
-                    for volume_id in volumes {
-                        let volume_exists: bool = Volume::exists(&volume_id).get_result(writer)?;
+                    insert_into(container_networks::table)
+                        .values(ContainerNetwork {
+                            container_id: container.id,
+                            network_id,
+                        })
+                        .on_conflict_do_nothing()
+                        .execute(writer)?;
+                }
 
-                        if !volume_exists {
-                            insert_into(container_missing_volumes::table)
-                                .values(ContainerMissingVolume {
-                                    container_id: container.id,
-                                    volume_id,
-                                })
-                                .on_conflict_do_nothing()
-                                .execute(writer)?;
+                for volume_id in volumes {
+                    let volume_exists: bool = Volume::exists(&volume_id).get_result(writer)?;
 
-                            continue;
-                        }
-
-                        insert_into(container_volumes::table)
-                            .values(ContainerVolume {
+                    if !volume_exists {
+                        insert_into(container_missing_volumes::table)
+                            .values(ContainerMissingVolume {
                                 container_id: container.id,
                                 volume_id,
                             })
                             .on_conflict_do_nothing()
                             .execute(writer)?;
+
+                        continue;
                     }
 
-                    Ok(())
-                })
+                    insert_into(container_volumes::table)
+                        .values(ContainerVolume {
+                            container_id: container.id,
+                            volume_id,
+                        })
+                        .on_conflict_do_nothing()
+                        .execute(writer)?;
+                }
+
+                Ok(())
             })
             .await
     }
