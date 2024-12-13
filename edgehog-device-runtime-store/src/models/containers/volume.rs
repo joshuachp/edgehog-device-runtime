@@ -20,63 +20,28 @@
 
 use std::fmt::Display;
 
-use diesel::{
-    backend::Backend,
-    deserialize::{FromSql, FromSqlRow},
-    dsl::{exists, BareSelect, Eq, Filter},
-    expression::AsExpression,
-    select,
-    serialize::{IsNull, ToSql},
-    sql_types::Integer,
-    sqlite::Sqlite,
-    Associations, ExpressionMethods, Insertable, QueryDsl, Queryable, Selectable,
+use rusqlite::{
+    types::{FromSql, FromSqlError, ToSqlOutput},
+    ToSql,
 };
-
-use crate::{conversions::SqlUuid, schema::containers::volumes};
+use uuid::Uuid;
 
 /// Container volume with driver configuration.
-#[derive(Insertable, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::containers::volumes)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[derive(Debug, Clone)]
 pub struct Volume {
     /// Unique id received from Edgehog.
-    pub id: SqlUuid,
+    pub id: Uuid,
     /// Status of the volume.
     pub status: VolumeStatus,
     /// Driver to use for the volume.
     pub driver: String,
 }
 
-type VolumeById<'a> = Eq<volumes::id, &'a SqlUuid>;
-type VolumeFilterById<'a> = Filter<volumes::table, VolumeById<'a>>;
-type VolumeExists<'a> = BareSelect<exists<Filter<volumes::table, VolumeById<'a>>>>;
-
-impl Volume {
-    /// Returns the filter volume table by id.
-    pub fn by_id(id: &SqlUuid) -> VolumeById<'_> {
-        volumes::id.eq(id)
-    }
-
-    /// Returns the filtered volume table by id.
-    pub fn find_id(id: &SqlUuid) -> VolumeFilterById<'_> {
-        volumes::table.filter(Self::by_id(id))
-    }
-
-    /// Returns the volume exists query.
-    pub fn exists(id: &SqlUuid) -> VolumeExists<'_> {
-        select(exists(Self::find_id(id)))
-    }
-}
-
 /// Container volume with driver configuration.
-#[derive(Insertable, Queryable, Associations, Selectable)]
-#[diesel(table_name = crate::schema::containers::volume_driver_opts)]
-#[diesel(belongs_to(Volume))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-#[diesel(treat_none_as_default_value = false)]
+#[derive(Debug, Clone)]
 pub struct VolumeDriverOpts {
     /// Id of the volume.
-    pub volume_id: SqlUuid,
+    pub volume_id: Uuid,
     /// Name of the driver option
     pub name: String,
     /// Value of the driver option
@@ -84,11 +49,8 @@ pub struct VolumeDriverOpts {
 }
 
 /// Status of a volume.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, FromSqlRow, AsExpression,
-)]
-#[diesel(sql_type = Integer)]
 pub enum VolumeStatus {
     /// Received from Edgehog.
     #[default]
@@ -109,43 +71,34 @@ impl Display for VolumeStatus {
     }
 }
 
-impl From<VolumeStatus> for i32 {
+impl From<VolumeStatus> for u8 {
     fn from(value: VolumeStatus) -> Self {
-        (value as u8).into()
+        value as u8
     }
 }
 
-impl TryFrom<i32> for VolumeStatus {
-    type Error = String;
+impl TryFrom<i64> for VolumeStatus {
+    type Error = FromSqlError;
 
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(VolumeStatus::Received),
             1 => Ok(VolumeStatus::Published),
             2 => Ok(VolumeStatus::Created),
-            _ => Err(format!("unrecognized status value {value}")),
+            _ => Err(FromSqlError::OutOfRange(value)),
         }
     }
 }
 
-impl FromSql<Integer, Sqlite> for VolumeStatus {
-    fn from_sql(bytes: <Sqlite as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
-        let value = i32::from_sql(bytes)?;
-
-        Self::try_from(value).map_err(Into::into)
+impl FromSql for VolumeStatus {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        value.as_i64().and_then(Self::try_from)
     }
 }
 
-impl ToSql<Integer, Sqlite> for VolumeStatus {
-    fn to_sql<'b>(
-        &'b self,
-        out: &mut diesel::serialize::Output<'b, '_, Sqlite>,
-    ) -> diesel::serialize::Result {
-        let val = i32::from(*self);
-
-        out.set_value(val);
-
-        Ok(IsNull::No)
+impl ToSql for VolumeStatus {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(u8::from(*self)))
     }
 }
 
@@ -162,7 +115,7 @@ mod tests {
         ];
 
         for exp in variants {
-            let val = i32::from(exp);
+            let val = i64::from(u8::from(exp));
 
             let status = VolumeStatus::try_from(val).unwrap();
 

@@ -18,35 +18,23 @@
 
 //! Container models.
 
-use std::{fmt::Display, ops::Deref};
+use std::fmt::Display;
 
-use diesel::{
-    backend::Backend,
-    deserialize::{FromSql, FromSqlRow},
-    expression::AsExpression,
-    serialize::{IsNull, ToSql},
-    sql_types::Integer,
-    sqlite::Sqlite,
-    Associations, Insertable, Queryable, Selectable,
+use rusqlite::{
+    types::{FromSql, FromSqlError, ToSqlOutput},
+    ToSql,
 };
-
-use crate::{
-    conversions::SqlUuid,
-    models::containers::{image::Image, network::Network, volume::Volume},
-};
+use uuid::Uuid;
 
 /// Container configuration.
-#[derive(Debug, Clone, Insertable, Queryable, Associations, Selectable)]
-#[diesel(table_name = crate::schema::containers::containers)]
-#[diesel(belongs_to(Image))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[derive(Debug, Clone)]
 pub struct Container {
     /// Unique id received from Edgehog.
-    pub id: SqlUuid,
+    pub id: Uuid,
     /// Container id returned by the container engine.
     pub local_id: Option<String>,
     /// Unique id received from Edgehog.
-    pub image_id: Option<SqlUuid>,
+    pub image_id: Option<Uuid>,
     /// Status of the volume.
     pub status: ContainerStatus,
     /// Container network mode: none, bridge, ...
@@ -60,11 +48,8 @@ pub struct Container {
 }
 
 /// Status of a container.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, FromSqlRow, AsExpression,
-)]
-#[diesel(sql_type = Integer)]
 pub enum ContainerStatus {
     /// Received from Edgehog.
     #[default]
@@ -91,210 +76,68 @@ impl Display for ContainerStatus {
     }
 }
 
-impl From<ContainerStatus> for i32 {
+impl From<ContainerStatus> for u8 {
     fn from(value: ContainerStatus) -> Self {
-        (value as u8).into()
+        value as u8
     }
 }
 
-impl TryFrom<i32> for ContainerStatus {
-    type Error = String;
+impl TryFrom<i64> for ContainerStatus {
+    type Error = FromSqlError;
 
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(ContainerStatus::Received),
             1 => Ok(ContainerStatus::Published),
             2 => Ok(ContainerStatus::Created),
             3 => Ok(ContainerStatus::Running),
             4 => Ok(ContainerStatus::Stopped),
-            _ => Err(format!("unrecognized status value {value}")),
+            _ => Err(FromSqlError::OutOfRange(value)),
         }
     }
 }
 
-impl FromSql<Integer, Sqlite> for ContainerStatus {
-    fn from_sql(bytes: <Sqlite as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
-        let value = i32::from_sql(bytes)?;
-
-        Self::try_from(value).map_err(Into::into)
+impl FromSql for ContainerStatus {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        value.as_i64().and_then(Self::try_from)
     }
 }
 
-impl ToSql<Integer, Sqlite> for ContainerStatus {
-    fn to_sql<'b>(
-        &'b self,
-        out: &mut diesel::serialize::Output<'b, '_, Sqlite>,
-    ) -> diesel::serialize::Result {
-        let val = i32::from(*self);
-
-        out.set_value(val);
-
-        Ok(IsNull::No)
-    }
-}
-
-/// Missing image for a container
-#[derive(Debug, Clone, Copy, Insertable, Queryable, Associations, Selectable)]
-#[diesel(table_name = crate::schema::containers::container_missing_images)]
-#[diesel(belongs_to(Container))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct ContainerMissingImage {
-    /// [`Container`] id
-    pub container_id: SqlUuid,
-    /// [`Image`] id
-    pub image_id: SqlUuid,
-}
-
-/// Networks used by a container
-#[derive(Debug, Clone, Copy, Insertable, Queryable, Associations, Selectable)]
-#[diesel(table_name = crate::schema::containers::container_networks)]
-#[diesel(belongs_to(Container))]
-#[diesel(belongs_to(Network))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct ContainerNetwork {
-    /// [`Container`] id
-    pub container_id: SqlUuid,
-    /// [`Network`] id
-    pub network_id: SqlUuid,
-}
-
-/// Missing image for a container
-#[derive(Debug, Clone, Copy, Insertable, Queryable, Associations, Selectable)]
-#[diesel(table_name = crate::schema::containers::container_missing_networks)]
-#[diesel(belongs_to(Container))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct ContainerMissingNetwork {
-    /// [`Container`] id
-    pub container_id: SqlUuid,
-    /// [`Network`] id
-    pub network_id: SqlUuid,
-}
-
-impl From<ContainerNetwork> for ContainerMissingNetwork {
-    fn from(
-        ContainerNetwork {
-            container_id,
-            network_id,
-        }: ContainerNetwork,
-    ) -> Self {
-        Self {
-            container_id,
-            network_id,
-        }
-    }
-}
-
-/// Volumes used by a container
-#[derive(Debug, Clone, Copy, Insertable, Queryable, Associations, Selectable)]
-#[diesel(table_name = crate::schema::containers::container_volumes)]
-#[diesel(belongs_to(Container))]
-#[diesel(belongs_to(Volume))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct ContainerVolume {
-    /// [`Container`] id
-    pub container_id: SqlUuid,
-    /// [`Volume`] id
-    pub volume_id: SqlUuid,
-}
-
-/// Missing image for a container
-#[derive(Debug, Clone, Copy, Insertable, Queryable, Associations, Selectable)]
-#[diesel(table_name = crate::schema::containers::container_missing_volumes)]
-#[diesel(belongs_to(Container))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct ContainerMissingVolume {
-    /// [`Container`] id
-    pub container_id: SqlUuid,
-    /// [`Volume`] id
-    pub volume_id: SqlUuid,
-}
-
-impl From<ContainerVolume> for ContainerMissingVolume {
-    fn from(
-        ContainerVolume {
-            container_id,
-            volume_id,
-        }: ContainerVolume,
-    ) -> Self {
-        Self {
-            container_id,
-            volume_id,
-        }
+impl ToSql for ContainerStatus {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(u8::from(*self)))
     }
 }
 
 /// Environment variables for a container
-#[derive(Debug, Clone, Insertable, Queryable, Associations, Selectable)]
-#[diesel(table_name = crate::schema::containers::container_env)]
-#[diesel(belongs_to(Container))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[derive(Debug, Clone)]
 pub struct ContainerEnv {
     /// [`Container`] id
-    pub container_id: SqlUuid,
+    pub container_id: Uuid,
     /// Environment variable name and optionally a value
     pub value: String,
 }
 
 /// Bind mounts for a container
-#[derive(Debug, Clone, Insertable, Queryable, Associations, Selectable)]
-#[diesel(table_name = crate::schema::containers::container_binds)]
-#[diesel(belongs_to(Container))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[derive(Debug, Clone)]
 pub struct ContainerBinds {
     /// [`Container`] id
-    pub container_id: SqlUuid,
+    pub container_id: Uuid,
     /// Environment variable name and optionally a value
     pub value: String,
 }
 
 /// Container port bindings
-#[derive(Debug, Clone, Insertable, Queryable, Associations, Selectable)]
-#[diesel(table_name = crate::schema::containers::container_port_bindings)]
-#[diesel(belongs_to(Container))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+#[derive(Debug, Clone)]
 pub struct ContainerPortBinds {
     /// [`Container`] id
-    pub container_id: SqlUuid,
+    pub container_id: Uuid,
     /// Container port and optionally protocol
     pub port: String,
     /// Host IP to map the port to
     pub host_ip: Option<String>,
     /// Host port to map the port to
-    pub host_port: Option<HostPort>,
-}
-
-/// Wrapper to a [`u16`] to be inserted into the database
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, FromSqlRow, AsExpression)]
-#[diesel(sql_type = Integer)]
-pub struct HostPort(pub u16);
-
-impl Deref for HostPort {
-    type Target = u16;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl FromSql<Integer, Sqlite> for HostPort {
-    fn from_sql(bytes: <Sqlite as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
-        let value = i32::from_sql(bytes)?;
-
-        u16::try_from(value).map(HostPort).map_err(Into::into)
-    }
-}
-
-impl ToSql<Integer, Sqlite> for HostPort {
-    fn to_sql<'b>(
-        &'b self,
-        out: &mut diesel::serialize::Output<'b, '_, Sqlite>,
-    ) -> diesel::serialize::Result {
-        let val = i32::from(self.0);
-
-        out.set_value(val);
-
-        Ok(IsNull::No)
-    }
+    pub host_port: Option<u16>,
 }
 
 #[cfg(test)]
@@ -312,7 +155,7 @@ mod tests {
         ];
 
         for exp in variants {
-            let val = i32::from(exp);
+            let val = i64::from(u8::from(exp));
 
             let status = ContainerStatus::try_from(val).unwrap();
 

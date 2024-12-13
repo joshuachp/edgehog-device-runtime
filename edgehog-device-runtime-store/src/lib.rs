@@ -25,7 +25,5 @@
 
 //! Separate crate for the database definitions
 
-pub mod conversions;
 pub mod db;
 pub mod models;
-pub mod schema;
