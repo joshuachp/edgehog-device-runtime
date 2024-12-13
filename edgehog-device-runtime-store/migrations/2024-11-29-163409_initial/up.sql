@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS containers (
 );
 
 CREATE TABLE IF NOT EXISTS container_missing_images (
-    container_id BLOB PRIMARY KEY NOT NULL REFERENCES container (
+    container_id BLOB PRIMARY KEY NOT NULL REFERENCES containers (
         id
     ) ON UPDATE CASCADE ON DELETE CASCADE,
     image_id BLOB NOT NULL

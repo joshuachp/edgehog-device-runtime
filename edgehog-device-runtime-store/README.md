@@ -14,3 +14,6 @@ To generate new migration you'll need the `diesel-cli`
 export DATABASE_URL=sqlite:///tmp/edgehog-containers/state.db
 diesel migration generate create_some_migration
 ```
+
+There are also script to run in the `scripts` directory to generate the SQLite file or run all the
+migrations.

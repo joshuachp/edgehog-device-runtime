@@ -28,7 +28,7 @@
 
 use std::{error::Error, fmt::Debug, sync::Arc};
 
-use diesel::{Connection, ConnectionError, SqliteConnection};
+use diesel::{sql_query, Connection, ConnectionError, RunQueryDsl, SqliteConnection};
 use diesel_migrations::MigrationHarness;
 use tokio::{sync::Mutex, task::JoinError};
 use tracing::warn;
@@ -36,6 +36,9 @@ use tracing::warn;
 type DynError = Box<dyn Error + Send + Sync>;
 /// Result for the [`HandleError`] returned by the [`Handle`].
 pub type Result<T> = std::result::Result<T, HandleError>;
+
+/// PRAGMA for the connection
+const INIT: &str = include_str!("../assets/init.sql");
 
 /// Handler error
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
@@ -71,7 +74,7 @@ pub struct Handle {
 impl Handle {
     /// Create a new instance by connecting to the file
     pub async fn open(db_file: &str) -> Result<Self> {
-        let mut writer = Self::establish(db_file)?;
+        let mut writer = Self::establish(db_file).await?;
 
         let writer = tokio::task::spawn_blocking(move || -> Result<SqliteConnection> {
             #[cfg(feature = "containers")]
@@ -84,7 +87,7 @@ impl Handle {
         .await??;
 
         let writer = Arc::new(Mutex::new(writer));
-        let reader = Self::establish(db_file)?;
+        let reader = Self::establish_reader(db_file).await?;
 
         Ok(Self {
             db_file: db_file.to_string(),
@@ -94,16 +97,31 @@ impl Handle {
     }
 
     /// Sets options for the connection
-    fn establish(db_file: &str) -> Result<SqliteConnection> {
-        SqliteConnection::establish(db_file).map_err(|err| HandleError::Connection {
-            db_file: db_file.to_string(),
-            backtrace: err,
+    async fn establish(db_file: &str) -> Result<SqliteConnection> {
+        let mut conn =
+            SqliteConnection::establish(db_file).map_err(|err| HandleError::Connection {
+                db_file: db_file.to_string(),
+                backtrace: err,
+            })?;
+
+        tokio::task::spawn_blocking(|| {
+            sql_query(INIT)
+                .execute(&mut conn)
+                .map_err(HandleError::Query)?;
+
+            Ok(conn)
         })
+        .await?
+    }
+
+    /// Sets options for the connection
+    async fn establish_reader(db_file: &str) -> Result<SqliteConnection> {
+        Self::establish(&format!("{}?mode=ro", db_file)).await
     }
 
     /// Create a new handle for the store
-    pub fn clone_handle(&self) -> Result<Self> {
-        let reader = Self::establish(&self.db_file)?;
+    pub async fn clone_handle(&self) -> Result<Self> {
+        let reader = Self::establish_reader(&self.db_file).await?;
 
         Ok(Self {
             db_file: self.db_file.clone(),
@@ -127,7 +145,7 @@ impl Handle {
                     self.db_file
                 );
 
-                Self::establish(&self.db_file).map(Box::new)?
+                Self::establish(&self.db_file).await.map(Box::new)?
             }
         };
 
@@ -154,6 +172,17 @@ impl Handle {
 
         tokio::task::spawn_blocking(move || (f)(&mut writer)).await?
     }
+
+    /// Passes the writer to a callback with a transaction already started.
+    pub async fn for_write_transaction<F, O>(&self, f: F) -> Result<O>
+    where
+        F: FnOnce(&mut SqliteConnection) -> Result<O> + Send + 'static,
+        O: Send + 'static,
+    {
+        let mut writer = Arc::clone(&self.writer).lock_owned().await;
+
+        tokio::task::spawn_blocking(move || writer.transaction(|writer| (f)(writer))).await?
+    }
 }
 
 impl Debug for Handle {
@@ -161,5 +190,21 @@ impl Debug for Handle {
         f.debug_struct("Store")
             .field("db_file", &self.db_file)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn should_open_db() {
+        let tmp = TempDir::with_prefix("should_open").unwrap();
+
+        Handle::open(&tmp.path().join("database.db").to_string_lossy())
+            .await
+            .unwrap();
     }
 }

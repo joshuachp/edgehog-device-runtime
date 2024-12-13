@@ -14,5 +14,8 @@ tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
 tracing = { workspace = true }
 uuid = { workspace = true }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [features]
 containers = []

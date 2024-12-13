@@ -1254,6 +1254,7 @@ dependencies = [
  "diesel",
  "diesel_migrations",
  "displaydoc",
+ "tempfile",
  "thiserror 2.0.3",
  "tokio",
  "tracing",
