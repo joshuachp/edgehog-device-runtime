@@ -22,12 +22,14 @@ use std::fmt::Display;
 
 use rusqlite::{
     types::{FromSql, FromSqlError, ToSqlOutput},
-    ToSql,
+    Connection, OptionalExtension, ToSql, Transaction,
 };
 use uuid::Uuid;
 
+use crate::{db::HandleError, models::include_query};
+
 /// Container configuration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Container {
     /// Unique id received from Edgehog.
     pub id: Uuid,
@@ -45,6 +47,74 @@ pub struct Container {
     pub restart_policy: String,
     /// Privileged
     pub privileged: bool,
+}
+
+impl Container {
+    fn create(&self, transaction: &mut Transaction) -> Result<(), HandleError> {
+        let Container {
+            id,
+            local_id,
+            image_id,
+            status,
+            network_mode,
+            hostname,
+            restart_policy,
+            privileged,
+        } = self;
+
+        transaction
+            .prepare_cached(include_query!("write/container/insert_container.sql"))?
+            .execute((
+                id,
+                local_id,
+                image_id,
+                status,
+                network_mode,
+                hostname,
+                restart_policy,
+                privileged,
+            ))?;
+
+        Ok(())
+    }
+
+    fn by_id(connection: &Connection, id: &Uuid) -> Result<Option<Self>, HandleError> {
+        connection
+            .prepare_cached(include_query!("read/container/by_id_container.sql"))?
+            .query_row((id,), |r| {
+                let container = Container {
+                    id: r.get("id")?,
+                    local_id: r.get("local_id")?,
+                    image_id: r.get("image_id")?,
+                    status: r.get("status")?,
+                    network_mode: r.get("network_mode")?,
+                    hostname: r.get("hostname")?,
+                    restart_policy: r.get("restart_policy")?,
+                    privileged: r.get("privileged")?,
+                };
+
+                Ok(container)
+            })
+            .optional()
+            .map_err(HandleError::Query)
+    }
+
+    fn create_missing_image(
+        &mut self,
+        transaction: &mut Transaction,
+        image_id: Uuid,
+    ) -> Result<(), HandleError> {
+        let container_image_id = self.image_id.take();
+        debug_assert_eq!(container_image_id, Some(image_id));
+
+        transaction
+            .prepare_cached(include_query!(
+                "write/container/insert_container_missing_image.sql"
+            ))?
+            .execute((self.id, image_id))?;
+
+        Ok(())
+    }
 }
 
 /// Status of a container.
@@ -142,7 +212,11 @@ pub struct ContainerPortBinds {
 
 #[cfg(test)]
 mod tests {
-    use super::ContainerStatus;
+    use tempfile::TempDir;
+
+    use crate::db::Handle;
+
+    use super::*;
 
     #[test]
     fn should_convert_status() {
@@ -161,5 +235,138 @@ mod tests {
 
             assert_eq!(status, exp);
         }
+    }
+
+    #[tokio::test]
+    async fn should_store_and_get_by_id() {
+        let tmpfile = TempDir::with_suffix("store-container").unwrap();
+        let mut handle = Handle::open(tmpfile.path().join("database.db"))
+            .await
+            .unwrap();
+
+        let container = Container {
+            id: Uuid::new_v4(),
+            local_id: Some("local_id".to_string()),
+            image_id: Some(Uuid::new_v4()),
+            status: ContainerStatus::Created,
+            network_mode: "bridge".to_string(),
+            hostname: "hostname".to_string(),
+            restart_policy: "unless-stopped".to_string(),
+            privileged: true,
+        };
+
+        handle
+            .for_write_transaction({
+                let container = container.clone();
+                move |conn| container.create(conn)
+            })
+            .await
+            .unwrap();
+
+        let res = handle
+            .for_read(move |conn| Container::by_id(conn, &container.id))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(res, container);
+    }
+
+    #[tokio::test]
+    async fn should_not_error_on_multiple_stores() {
+        let tmpfile = TempDir::with_suffix("multi-store-container").unwrap();
+        let mut handle = Handle::open(tmpfile.path().join("database.db"))
+            .await
+            .unwrap();
+
+        let container = Container {
+            id: Uuid::new_v4(),
+            local_id: Some("local_id".to_string()),
+            image_id: Some(Uuid::new_v4()),
+            status: ContainerStatus::Created,
+            network_mode: "bridge".to_string(),
+            hostname: "hostname".to_string(),
+            restart_policy: "unless-stopped".to_string(),
+            privileged: true,
+        };
+
+        handle
+            .for_write_transaction({
+                let mut container = container.clone();
+                move |conn| {
+                    container.create(conn)?;
+
+                    // Creating the image should ignore the changes
+                    container.status = ContainerStatus::Received;
+
+                    container.create(conn)
+                }
+            })
+            .await
+            .unwrap();
+
+        let res = handle
+            .for_read(move |conn| Container::by_id(conn, &container.id))
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Should be equal to the first image
+        assert_eq!(res, container);
+    }
+
+    #[tokio::test]
+    async fn should_insert_container_missing_image() {
+        let tmpfile = TempDir::with_suffix("multi-store-container").unwrap();
+        let mut handle = Handle::open(tmpfile.path().join("database.db"))
+            .await
+            .unwrap();
+
+        let container = Container {
+            id: Uuid::new_v4(),
+            local_id: Some("local_id".to_string()),
+            image_id: Some(Uuid::new_v4()),
+            status: ContainerStatus::Created,
+            network_mode: "bridge".to_string(),
+            hostname: "hostname".to_string(),
+            restart_policy: "unless-stopped".to_string(),
+            privileged: true,
+        };
+
+        handle
+            .for_write_transaction({
+                let mut container = container.clone();
+                move |conn| {
+                    container.create_missing_image(conn, container.image_id.unwrap())?;
+
+                    let mut container_withot_image = container.clone();
+
+                    container_withot_image.image_id = None;
+
+                    assert_eq!(container, container_withot_image);
+
+                    Ok(())
+                }
+            })
+            .await
+            .unwrap();
+
+        handle
+            .for_read(move |conn| {
+                conn.query_row(
+                    "
+SELECT * FROM
+    container_missing_images
+WHERE 
+    container_missing_images.container_id = ?
+    AND container_missing_images.image_id = ?;",
+                    (container.id, container.image_id),
+                    |_r| Ok(()),
+                )
+                .unwrap();
+                Ok(())
+            })
+            .await
+            .unwrap();
     }
 }

@@ -22,12 +22,15 @@ use std::{fmt::Display, i64};
 
 use rusqlite::{
     types::{FromSql, FromSqlError, ToSqlOutput},
-    ToSql,
+    Connection, OptionalExtension, ToSql, Transaction,
 };
+use tracing::debug;
 use uuid::Uuid;
 
+use crate::{db::HandleError, models::include_query};
+
 /// Container image with the authentication to pull it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Image {
     /// Unique id received from Edgehog.
     pub id: Uuid,
@@ -41,6 +44,52 @@ pub struct Image {
     pub reference: String,
     /// Base64 encoded JSON for the registry auth.
     pub registry_auth: Option<String>,
+}
+
+impl Image {
+    fn create(&self, conn: &mut Transaction) -> Result<(), HandleError> {
+        let Self {
+            id,
+            local_id,
+            status,
+            reference,
+            registry_auth,
+        } = self;
+
+        conn.prepare_cached(include_query!("write/image/insert_image.sql"))?
+            .execute((id, local_id, status, reference, registry_auth))?;
+
+        Ok(())
+    }
+
+    fn by_id(connection: &Connection, id: &Uuid) -> Result<Option<Self>, HandleError> {
+        connection
+            .prepare_cached(include_query!("read/image/by_id_image.sql"))?
+            .query_row((id,), |r| {
+                let image = Image {
+                    id: r.get("id")?,
+                    local_id: r.get("local_id")?,
+                    status: r.get("status")?,
+                    reference: r.get("reference")?,
+                    registry_auth: r.get("registry_auth")?,
+                };
+
+                Ok(image)
+            })
+            .optional()
+            .map_err(HandleError::Query)
+    }
+
+    fn update_missing_images(&self, transaction: &mut Transaction) -> Result<(), HandleError> {
+        let count = transaction.execute(
+            include_query!("write/image/update_container_missing_image.sql"),
+            (self.id,),
+        )?;
+
+        debug!("Updated {count} containers with missing images");
+
+        Ok(())
+    }
 }
 
 /// Status of an image.
@@ -101,7 +150,12 @@ impl ToSql for ImageStatus {
 
 #[cfg(test)]
 mod tests {
-    use super::ImageStatus;
+    use tempfile::TempDir;
+    use uuid::Uuid;
+
+    use crate::{db::Handle, models::containers::image::Image};
+
+    use super::*;
 
     #[test]
     fn should_convert_status() {
@@ -118,5 +172,77 @@ mod tests {
 
             assert_eq!(status, exp);
         }
+    }
+
+    #[tokio::test]
+    async fn should_store_and_get_by_id() {
+        let tmpfile = TempDir::with_suffix("store-image").unwrap();
+        let mut handle = Handle::open(tmpfile.path().join("database.db"))
+            .await
+            .unwrap();
+
+        let image = Image {
+            id: Uuid::new_v4(),
+            local_id: Some("local_id".to_string()),
+            status: ImageStatus::Pulled,
+            reference: "docker.io/library/postgres:15".to_string(),
+            registry_auth: None,
+        };
+
+        handle
+            .for_write_transaction({
+                let image = image.clone();
+                move |conn| image.create(conn)
+            })
+            .await
+            .unwrap();
+
+        let res = handle
+            .for_read(move |conn| Image::by_id(conn, &image.id))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(res, image);
+    }
+
+    #[tokio::test]
+    async fn should_not_error_on_multiple_stores() {
+        let tmpfile = TempDir::with_suffix("multi-store-image").unwrap();
+        let mut handle = Handle::open(tmpfile.path().join("database.db"))
+            .await
+            .unwrap();
+
+        let image = Image {
+            id: Uuid::new_v4(),
+            local_id: Some("local_id".to_string()),
+            status: ImageStatus::Pulled,
+            reference: "docker.io/library/postgres:15".to_string(),
+            registry_auth: None,
+        };
+
+        handle
+            .for_write_transaction({
+                let mut image = image.clone();
+                move |conn| {
+                    image.create(conn)?;
+
+                    // Creating the image should ignore the changes
+                    image.status = ImageStatus::Received;
+
+                    image.create(conn)
+                }
+            })
+            .await
+            .unwrap();
+
+        let res = handle
+            .for_read(move |conn| Image::by_id(conn, &image.id))
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Should be equal to the first image
+        assert_eq!(res, image);
     }
 }

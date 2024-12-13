@@ -16,15 +16,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! Models for all the resources.
+use crate::models::containers::image::Image;
 
-#[cfg(feature = "containers")]
-pub mod containers;
+use super::{Handle, Result};
 
-macro_rules! include_query {
-    ($file:expr) => {
-        include_str!(concat!("../../../queries/", $file))
-    };
+impl Handle {
+    /// Check if the image exists and stores it if its missing.
+    pub async fn store_image(&self, image: Image) -> Result<()> {
+        todo!()
+    }
 }
-
-pub(self) use include_query;

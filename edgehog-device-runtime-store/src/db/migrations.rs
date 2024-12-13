@@ -78,10 +78,8 @@ pub(super) fn run_migrations(connection: &mut Connection) -> Result<()> {
             })?;
 
         transaction
-            .execute(
-                include_query!("write/insert_migration.sql"),
-                (migration.name,),
-            )
+            .prepare_cached(include_query!("write/insert_migration.sql"))
+            .and_then(|mut st| st.execute((migration.name,)))
             .map_err(|err| HandleError::Migration {
                 name: migration.name,
                 backtrace: err,
