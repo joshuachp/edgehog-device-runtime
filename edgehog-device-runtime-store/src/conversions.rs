@@ -35,6 +35,13 @@ use uuid::Uuid;
 #[diesel(sql_type = Binary)]
 pub struct SqlUuid(Uuid);
 
+impl SqlUuid {
+    /// create a new wrapped [`uuid`]
+    pub fn new(uuid: impl into<uuid>) -> self {
+        self(uuid.into())
+    }
+}
+
 impl Deref for SqlUuid {
     type Target = Uuid;
 
@@ -46,6 +53,12 @@ impl Deref for SqlUuid {
 impl Borrow<Uuid> for SqlUuid {
     fn borrow(&self) -> &Uuid {
         &self.0
+    }
+}
+
+impl From<&Uuid> for SqlUuid {
+    fn from(value: &Uuid) -> Self {
+        SqlUuid(*value)
     }
 }
 

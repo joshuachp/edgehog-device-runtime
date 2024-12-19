@@ -23,16 +23,18 @@ use std::{fmt::Display, ops::Deref};
 use diesel::{
     backend::Backend,
     deserialize::{FromSql, FromSqlRow},
+    dsl::{Eq, Filter},
     expression::AsExpression,
     serialize::{IsNull, ToSql},
     sql_types::Integer,
     sqlite::Sqlite,
-    Associations, Insertable, Queryable, Selectable,
+    Associations, ExpressionMethods, Insertable, QueryDsl, Queryable, Selectable,
 };
 
 use crate::{
     conversions::SqlUuid,
     models::containers::{image::Image, network::Network, volume::Volume},
+    schema::containers::{container_missing_images, container_missing_networks},
 };
 
 /// Container configuration.
@@ -145,6 +147,22 @@ pub struct ContainerMissingImage {
     pub image_id: SqlUuid,
 }
 
+type ContainerMissingImageByImage<'a> = Eq<container_missing_images::image_id, &'a SqlUuid>;
+type ContainerMissingImageFilterByImage<'a> =
+    Filter<container_missing_images::table, ContainerMissingImageByImage<'a>>;
+
+impl ContainerMissingImage {
+    /// Returns the filter container_missing_image table by id.
+    pub fn by_image(image_id: &SqlUuid) -> ContainerMissingImageByImage<'_> {
+        container_missing_images::image_id.eq(image_id)
+    }
+
+    /// Returns the filtered container_missing_image table by id.
+    pub fn find_by_image(image_id: &SqlUuid) -> ContainerMissingImageFilterByImage<'_> {
+        container_missing_images::table.filter(Self::by_image(image_id))
+    }
+}
+
 /// Networks used by a container
 #[derive(Debug, Clone, Copy, Insertable, Queryable, Associations, Selectable)]
 #[diesel(table_name = crate::schema::containers::container_networks)]
@@ -168,6 +186,22 @@ pub struct ContainerMissingNetwork {
     pub container_id: SqlUuid,
     /// [`Network`] id
     pub network_id: SqlUuid,
+}
+
+type ContainerMissingNetworkByNetwork<'a> = Eq<container_missing_networks::network_id, &'a SqlUuid>;
+type ContainerMissingNetworkFilterByNetwork<'a> =
+    Filter<container_missing_networks::table, ContainerMissingNetworkByNetwork<'a>>;
+
+impl ContainerMissingNetwork {
+    /// Returns the filter container_missing_network table by id.
+    pub fn by_network(network_id: &SqlUuid) -> ContainerMissingNetworkByNetwork<'_> {
+        container_missing_networks::network_id.eq(network_id)
+    }
+
+    /// Returns the filtered container_missing_network table by id.
+    pub fn find_by_network(network_id: &SqlUuid) -> ContainerMissingNetworkFilterByNetwork<'_> {
+        container_missing_networks::table.filter(Self::by_network(network_id))
+    }
 }
 
 impl From<ContainerNetwork> for ContainerMissingNetwork {

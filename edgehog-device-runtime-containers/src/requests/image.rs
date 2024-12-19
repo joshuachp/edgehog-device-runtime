@@ -34,7 +34,17 @@ use super::ReqUuid;
 pub struct CreateImage {
     pub(crate) id: ReqUuid,
     pub(crate) reference: String,
-    pub(crate) registry_auth: String,
+    registry_auth: String,
+}
+
+impl CreateImage {
+    pub(crate) fn registry_auth(&self) -> Option<&str> {
+        if self.registry_auth.is_empty() {
+            None
+        } else {
+            Some(&self.registry_auth)
+        }
+    }
 }
 
 impl From<CreateImage> for Image<String> {
@@ -61,6 +71,14 @@ pub(crate) mod tests {
     use uuid::Uuid;
 
     use super::*;
+
+    pub fn mock_image_req(id: Uuid, reference: String, registry_auth: String) -> CreateImage {
+        CreateImage {
+            id: ReqUuid(id),
+            reference,
+            registry_auth,
+        }
+    }
 
     pub fn create_image_request_event(
         id: impl Display,

@@ -181,6 +181,18 @@ impl TryFrom<AstarteType> for ReqUuid {
     }
 }
 
+impl From<ReqUuid> for Uuid {
+    fn from(value: ReqUuid) -> Self {
+        value.0
+    }
+}
+
+impl From<&ReqUuid> for Uuid {
+    fn from(value: &ReqUuid) -> Self {
+        value.0
+    }
+}
+
 /// Wrapper to convert an [`AstarteType`] to [`Vec<Uuid>`].
 ///
 /// This is required because we cannot implement [`TryFrom<AstarteType>`] for [`Vec<ReqUuid>`], because
@@ -215,9 +227,10 @@ mod tests {
     use super::*;
 
     use astarte_device_sdk::Value;
+    use image::tests::mock_image_req;
     use network::{tests::create_network_request_event, CreateNetwork};
 
-    use crate::requests::{image::CreateImage, ContainerRequest};
+    use crate::requests::ContainerRequest;
 
     #[test]
     fn from_event_image() {
@@ -239,11 +252,11 @@ mod tests {
 
         let request = ContainerRequest::from_event(event).unwrap();
 
-        let expect = ContainerRequest::Image(CreateImage {
-            id: ReqUuid(id),
-            reference: "reference".to_string(),
-            registry_auth: "registry_auth".to_string(),
-        });
+        let expect = ContainerRequest::Image(mock_image_req(
+            id,
+            "reference".to_string(),
+            "registry_auth".to_string(),
+        ));
 
         assert_eq!(request, expect);
     }
