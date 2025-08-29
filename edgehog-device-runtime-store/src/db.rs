@@ -29,11 +29,16 @@
 use std::{
     error::Error,
     fmt::Debug,
+    num::NonZeroUsize,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 
-use diesel::{connection::SimpleConnection, Connection, ConnectionError, SqliteConnection};
+use deadpool::unmanaged::Pool;
+use diesel::{
+    connection::SimpleConnection, sqlite::Sqlite, Connection, ConnectionError, SqliteConnection,
+};
 use sync_wrapper::SyncWrapper;
 use tokio::{sync::Mutex, task::JoinError};
 use tracing::debug;
@@ -96,26 +101,28 @@ impl HandleError {
 }
 
 /// Read and write connection to the database
+#[derive(Clone)]
 pub struct Handle {
-    db_file: String,
+    pub db_file: Arc<str>,
     /// Write handle to the database
     pub writer: Arc<Mutex<SqliteConnection>>,
     /// Per task/thread reader
     // NOTE: this is needed because the connection isn't Sync, and we need to pass the Connection
     //       to another thread (for tokio). The option signal if the connection was invalidated by
     //       the inner task panicking. In that case we re-create the reader connection.
-    pub reader: SyncWrapper<Option<Box<SqliteConnection>>>,
+    pub reader: Pool<SqliteConnection>,
 }
 
 impl Handle {
     /// Create a new instance by connecting to the file
-    pub async fn open(db_file: impl AsRef<Path>) -> Result<Self> {
+    pub async fn open(db_file: impl AsRef<Path>, options: SqliteOptios) -> Result<Self> {
         let db_path = db_file.as_ref();
-        let db_str = db_path
+        let db_str: Arc<str> = db_path
             .to_str()
-            .ok_or_else(|| HandleError::NonUtf8Path(db_path.to_path_buf()))?;
+            .ok_or_else(|| HandleError::NonUtf8Path(db_path.to_path_buf()))
+            .map(Arc::from)?;
 
-        let writer = Self::establish_writer(db_str).await?;
+        let writer = options.establish(Arc::clone(&db_str), false).await?;
         // We don't have migrations other than the containers for now
         #[cfg(feature = "containers")]
         let mut writer = writer;
@@ -133,44 +140,11 @@ impl Handle {
         })
         .await??;
 
-        let writer = Arc::new(Mutex::new(writer));
-        let reader = Self::establish_reader(db_str).await?;
-
         Ok(Self {
-            db_file: db_str.to_string(),
-            writer,
-            reader: SyncWrapper::new(Some(Box::new(reader))),
+            db_file: db_str,
+            writer: Arc::new(Mutex::new(writer)),
+            reader: Pool::new(options.max_pool_size.into()),
         })
-    }
-
-    /// Sets options for the connection
-    async fn establish_writer(db_file: &str) -> Result<SqliteConnection> {
-        establish(db_file, INIT_WRITER).await
-    }
-
-    /// Sets options for the connection
-    async fn establish_reader(db_file: &str) -> Result<SqliteConnection> {
-        establish(db_file, INIT_READER).await
-    }
-
-    /// Create a new handle for the store
-    pub async fn clone_handle(&self) -> Result<Self> {
-        let reader = Self::establish_reader(&self.db_file).await?;
-
-        Ok(Self {
-            db_file: self.db_file.clone(),
-            writer: Arc::clone(&self.writer),
-            reader: SyncWrapper::new(Some(Box::new(reader))),
-        })
-    }
-
-    /// Create a new handle for the store, it will not initialize the reader connection.
-    pub fn clone_lazy(&self) -> Self {
-        Self {
-            db_file: self.db_file.clone(),
-            writer: Arc::clone(&self.writer),
-            reader: SyncWrapper::new(None),
-        }
     }
 
     /// Passes the reader to a callback to execute a query.
@@ -217,28 +191,87 @@ impl Handle {
     }
 }
 
-async fn establish(
-    db_file: &str,
-    pragma: &'static str,
-) -> std::result::Result<SqliteConnection, HandleError> {
-    let mut conn = SqliteConnection::establish(db_file).map_err(|err| HandleError::Connection {
-        db_file: db_file.to_string(),
-        backtrace: err,
-    })?;
-
-    tokio::task::spawn_blocking(move || {
-        conn.batch_execute(pragma).map_err(HandleError::Query)?;
-
-        Ok(conn)
-    })
-    .await?
-}
-
 impl Debug for Handle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Store")
+        f.debug_struct("Handle")
             .field("db_file", &self.db_file)
             .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SqliteOptios {
+    max_pool_size: NonZeroUsize,
+    busy_timout: Duration,
+    cache_size: i16,
+    max_page_count: u32,
+    journal_size_limit: u64,
+    wal_autocheckpoint: u32,
+}
+
+impl SqliteOptios {
+    async fn establish(
+        self,
+        db_file: Arc<str>,
+        reader: bool,
+    ) -> std::result::Result<SqliteConnection, HandleError> {
+        tokio::task::spawn_blocking(move || {
+            let mut conn =
+                SqliteConnection::establish(&db_file).map_err(|err| HandleError::Connection {
+                    db_file: db_file.to_string(),
+                    backtrace: err,
+                })?;
+
+            conn.batch_execute("PRAGMA journal_mode = wal;")?;
+            conn.batch_execute("PRAGMA foreign_keys = true;")?;
+            conn.batch_execute("PRAGMA synchronous = NORMAL;")?;
+            conn.batch_execute("PRAGMA auto_vacuum = INCREMENTAL;")?;
+            conn.batch_execute("PRAGMA temp_store = MEMORY;")?;
+            // NOTE: Safe to format since we handle the options, do not pass strings.
+            conn.batch_execute(&format!(
+                "PRAGMA busy_timeout = {};",
+                self.busy_timout.as_millis()
+            ))?;
+            conn.batch_execute(&format!("PRAGMA cache_size = {};", self.cache_size))?;
+            conn.batch_execute(&format!("PRAGMA max_page_count = {};", self.max_page_count))?;
+            conn.batch_execute(&format!(
+                "PRAGMA journal_size_limit = {};",
+                self.journal_size_limit
+            ))?;
+            conn.batch_execute(&format!(
+                "PRAGMA wal_autocheckpoint = {};",
+                self.wal_autocheckpoint
+            ))?;
+
+            if reader {
+                conn.batch_execute("PRAGMA query_only = ON;")?;
+            }
+
+            Ok(conn)
+        })
+        .await?
+    }
+}
+
+impl Default for SqliteOptios {
+    fn default() -> Self {
+        const DEFAULT_POOL_SIZE: NonZeroUsize = match NonZeroUsize::new(4) {
+            Some(size) => size,
+            None => unreachable!(),
+        };
+
+        Self {
+            max_pool_size: std::thread::available_parallelism().unwrap_or(DEFAULT_POOL_SIZE),
+            busy_timout: Duration::from_secs(5),
+            // 2 kib
+            cache_size: -2 * 1024,
+            // 2 gib (assumes 4096 page size)
+            max_page_count: 524288,
+            // 64 mib
+            journal_size_limit: 64 * 1024 * 1024,
+            // 1000 pages
+            wal_autocheckpoint: 1000,
+        }
     }
 }
 

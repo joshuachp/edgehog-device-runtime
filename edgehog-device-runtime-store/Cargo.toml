@@ -24,6 +24,7 @@ homepage.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+deadpool = { workspace = true, default-features = false, features = ["rt_tokio_1", "unmanaged"] }
 diesel = { workspace = true, features = ["sqlite", "uuid"] }
 diesel_migrations = { workspace = true, features = ["sqlite"] }
 displaydoc.workspace = true
