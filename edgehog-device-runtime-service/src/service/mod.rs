@@ -18,10 +18,11 @@
 
 //! Structure to manage the service.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use edgehog_containers::local::ContainerHandle;
 use edgehog_proto::tonic::transport::server::{Connected, TcpIncoming};
 use edgehog_proto::tonic::transport::Server;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -43,11 +44,13 @@ enum Listener {
     Socket(SocketAddr),
 }
 
-#[derive(Debug, Clone, Copy)]
-struct EdgehogService {}
+#[derive(Debug)]
+struct EdgehogService {
+    containers: ContainerHandle,
+}
 
 impl EdgehogService {
-    async fn spawn(self, options: ServiceOptions) -> eyre::Result<()> {
+    async fn run(self, options: ServiceOptions) -> eyre::Result<()> {
         let this = Arc::new(self);
 
         match options.listener {
@@ -56,12 +59,12 @@ impl EdgehogService {
                 let listener = UnixListener::bind(path_buf)?;
                 let stream = UnixListenerStream::new(listener);
 
-                serve(this, stream).await
+                serve(this, stream).await?;
             }
             Listener::Socket(addr) => {
                 let listener = TcpIncoming::bind(addr)?;
 
-                serve(this, listener).await
+                serve(this, listener).await?;
             }
         }
 

@@ -40,7 +40,13 @@ impl ContainersService for EdgehogService {
         &self,
         request: tonic::Request<ListRequest>,
     ) -> std::result::Result<tonic::Response<ListResponse>, tonic::Status> {
-        todo!()
+        let status = request.into_inner().status_filter();
+
+        self.containers.list();
+
+        Ok(ListResponse {
+            containers: todo!(),
+        })
     }
 
     async fn get(
