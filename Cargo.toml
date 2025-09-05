@@ -34,7 +34,7 @@ members = [
   "edgehog-device-runtime-containers",
   "edgehog-device-runtime-forwarder",
   "edgehog-device-runtime-service",
-  "edgehog-device-runtime-store",
+  "edgehog-device-runtime-store", "edgehogctl",
   "hardware-id-service",
   "led-manager-service",
 ]
