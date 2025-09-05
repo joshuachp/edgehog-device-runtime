@@ -1476,6 +1476,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "edgehogctl"
+version = "0.9.1"
+dependencies = [
+ "clap",
+ "color-eyre",
+ "edgehog-device-runtime-proto",
+ "eyre",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
