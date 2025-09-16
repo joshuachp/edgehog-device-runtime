@@ -47,37 +47,57 @@ mod volume;
 
 /// Handles the events received from the container runtime
 #[derive(Debug)]
-pub struct StatsMonitor<D> {
+pub struct StatsMonitor {
     client: Docker,
-    device: D,
     store: StateStore,
+    network: bool,
+    memory: bool,
+    cpu: bool,
+    blkio: bool,
+    pids: bool,
 }
 
-impl<D> StatsMonitor<D>
-where
-    D: Client + Send + Sync + 'static,
-{
+impl StatsMonitor {
     /// Creates a new instance.
-    pub fn new(client: Docker, device: D, store: StateStore) -> Self {
+    pub fn new(client: Docker, store: StateStore) -> Self {
         Self {
             client,
-            device,
             store,
+            network: false,
+            memory: false,
+            cpu: false,
+            blkio: false,
+            pids: false,
         }
     }
 
-    /// Gathers and sends the statistics to Astarte.
-    #[instrument(skip(self))]
-    pub async fn gather(&mut self) -> eyre::Result<()> {
-        self.containers().await?;
+    /// Check if any of the interfaces are enabled
+    fn is_any_enable(&self) -> bool {
+        self.network && self.memory && self.cpu && self.blkio && self.pids
+    }
 
-        self.volumes().await?;
+    /// Gathers and sends the statistics to Astarte.
+    #[instrument(skip(self, device))]
+    pub async fn gather<D>(&mut self, device: &mut D) -> eyre::Result<()>
+    where
+        D: Client + Send + Sync + 'static,
+    {
+        if !self.is_any_enable() {
+            return Ok(());
+        }
+
+        self.containers(device).await?;
+
+        self.volumes(device).await?;
 
         Ok(())
     }
 
-    #[instrument(skip(self))]
-    async fn containers(&mut self) -> eyre::Result<()> {
+    #[instrument(skip(self, device))]
+    async fn containers<D>(&mut self, device: &mut D) -> eyre::Result<()>
+    where
+        D: Client + Send + Sync + 'static,
+    {
         let containers: Vec<ContainerId> = self
             .store
             .load_containers_in_state(vec![ContainerStatus::Stopped, ContainerStatus::Running])
@@ -109,8 +129,7 @@ where
                 let networks = ContainerNetworkStats::from_stats(networks);
 
                 for net in networks {
-                    net.send(&container.name, &mut self.device, &timestamp)
-                        .await;
+                    net.send(&container.name, device, &timestamp).await;
                 }
             } else {
                 debug!("missing network stats");
@@ -118,15 +137,14 @@ where
 
             if let Some(memory) = stats.memory_stats {
                 ContainerMemory::from(&memory)
-                    .send(&container.name, &mut self.device, &timestamp)
+                    .send(&container.name, device, &timestamp)
                     .await;
 
                 if let Some(memory_stats) = memory.stats {
                     let memory = ContainerMemoryStats::from_stats(memory_stats);
 
                     for mem in memory {
-                        mem.send(&container.name, &mut self.device, &timestamp)
-                            .await;
+                        mem.send(&container.name, device, &timestamp).await;
                     }
                 } else {
                     trace!("missing cgroups v2 memory stats");
@@ -137,43 +155,38 @@ where
 
             if let Some(cpu) = stats.cpu_stats {
                 ContainerCpu::from_stats(cpu, stats.precpu_stats.unwrap_or_default())
-                    .send(&container.name, &mut self.device, &timestamp)
+                    .send(&container.name, device, &timestamp)
                     .await;
             } else {
                 debug!("missing cpu stats");
             }
 
-            match stats.blkio_stats {
-                Some(blkio) => {
-                    let blkio = ContainerBlkio::from_stats(blkio);
-                    for value in blkio {
-                        value
-                            .send(&container.name, &mut self.device, &timestamp)
-                            .await;
-                    }
+            if let Some(blkio) = stats.blkio_stats {
+                let blkio = ContainerBlkio::from_stats(blkio);
+                for value in blkio {
+                    value.send(&container.name, device, &timestamp).await;
                 }
-                None => {
-                    debug!("missing blkio stats");
-                }
+            } else {
+                debug!("missing blkio stats");
             }
 
-            match stats.pids_stats {
-                Some(pids) => {
-                    ContainerProcesses::from(pids)
-                        .send(&container.name, &mut self.device, &timestamp)
-                        .await;
-                }
-                None => {
-                    debug!("missing pids stats");
-                }
+            if let Some(pids) = stats.pids_stats {
+                ContainerProcesses::from(pids)
+                    .send(&container.name, device, &timestamp)
+                    .await;
+            } else {
+                debug!("missing pids stats");
             }
         }
 
         Ok(())
     }
 
-    #[instrument(skip(self))]
-    async fn volumes(&mut self) -> eyre::Result<()> {
+    #[instrument(skip(self, device))]
+    async fn volumes<D>(&mut self, device: &mut D) -> eyre::Result<()>
+    where
+        D: Client + Send + Sync + 'static,
+    {
         let volumes: Vec<VolumeId> = self
             .store
             .load_volumes_in_state(VolumeStatus::Created)
@@ -188,7 +201,7 @@ where
             match volume.inspect(&self.client).await {
                 Ok(Some(info)) => {
                     VolumeUsage::from(info)
-                        .send(&volume.name, &mut self.device, &Utc::now())
+                        .send(&volume.name, device, &Utc::now())
                         .await;
                 }
                 Ok(None) => {}
@@ -271,9 +284,6 @@ impl IntoAstarteExt for Option<Vec<u64>> {
 
 #[cfg(test)]
 mod tests {
-    use astarte_device_sdk::store::SqliteStore;
-    use astarte_device_sdk::transport::mqtt::Mqtt;
-    use astarte_device_sdk_mock::MockDeviceClient;
     use edgehog_store::db;
     use tempfile::TempDir;
 
@@ -289,9 +299,8 @@ mod tests {
         let store = StateStore::new(handle);
 
         let client = Docker::connect().await.unwrap();
-        let device = MockDeviceClient::<Mqtt<SqliteStore>>::new();
 
-        let _stats = StatsMonitor::new(client, device, store);
+        let _stats = StatsMonitor::new(client, store);
     }
 
     #[test]
