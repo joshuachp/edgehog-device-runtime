@@ -31,6 +31,7 @@ members = [
   "e2e-test",
   "e2e-test-containers",
   "e2e-test-forwarder",
+  "edgehog-device-runtime-config",
   "edgehog-device-runtime-containers",
   "edgehog-device-runtime-forwarder",
   "edgehog-device-runtime-service",
