@@ -1370,6 +1370,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "edgehog-device-runtime-config"
+version = "0.9.1"
+dependencies = [
+ "pretty_assertions",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "edgehog-device-runtime-containers"
 version = "0.9.1"
 dependencies = [
