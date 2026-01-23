@@ -47,6 +47,7 @@ fn split_key_value(line: &str) -> Option<(&str, &str)> {
         .filter(|(k, v)| !k.is_empty() && !v.is_empty())
 }
 
+#[derive(Debug, PartialEq)]
 pub struct OsRelease {
     pub os_info: OsInfo,
     pub base_image: BaseImage,
@@ -91,7 +92,7 @@ impl From<&str> for OsRelease {
 }
 
 /// get structured data for `io.edgehog.devicemanager.OSInfo` interface
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OsInfo {
     pub os_name: Option<String>,
@@ -139,7 +140,7 @@ impl From<&HashMap<&str, &str>> for OsInfo {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, PartialEq, Default)]
 pub struct BaseImage {
     name: Option<String>,
     version: Option<String>,

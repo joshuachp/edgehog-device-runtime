@@ -33,6 +33,7 @@ pub mod data;
 #[cfg(all(feature = "zbus", target_os = "linux"))]
 mod device;
 pub mod error;
+pub mod file_transfer;
 #[cfg(feature = "forwarder")]
 mod forwarder;
 #[cfg(all(feature = "zbus", target_os = "linux"))]

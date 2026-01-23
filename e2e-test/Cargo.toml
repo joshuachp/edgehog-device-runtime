@@ -20,16 +20,19 @@
 name = "e2e-test"
 version = "0.1.0"
 edition.workspace = true
+publish = false
 rust-version.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-astarte-device-sdk = { workspace = true, features = ["derive"] }
-clap = { workspace = true, features = ["derive", "env"] }
-color-eyre.workspace = true
+astarte-device-sdk = { workspace = true, features = ["derive", "vendored"] }
+config.workspace = true
 edgehog-device-runtime = { path = ".." }
 eyre.workspace = true
+pretty_assertions.workspace = true
+rstest.workspace = true
+rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempdir.workspace = true

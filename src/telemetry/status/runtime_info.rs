@@ -27,7 +27,7 @@ const INTERFACE: &str = "io.edgehog.devicemanager.RuntimeInfo";
 
 pub const RUNTIME_INFO: RuntimeInfo<'static> = RuntimeInfo::read();
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct RuntimeInfo<'a> {
     pub name: Cow<'a, str>,
     pub url: Cow<'a, str>,

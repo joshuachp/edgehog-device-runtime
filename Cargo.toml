@@ -161,6 +161,7 @@ bytes = "1.10.1"
 cfg-if = "1.0.3"
 clap = "4.5.49"
 color-eyre = "0.6.5"
+config = "0.15.19"
 deadpool = { version = "0.12.3", default-features = false }
 diesel = "2.3.5"
 diesel_migrations = "2.3.1"
@@ -186,6 +187,7 @@ mockall = "0.14.0"
 pretty_assertions = "1.4.1"
 procfs = "0.18.0"
 reqwest = { version = "0.13.1", default-features = false }
+rstest = "0.26.1"
 # Version required by diesel
 rusqlite = "0.36.0"
 rustc_version = "0.4.1"

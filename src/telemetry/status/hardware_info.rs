@@ -25,7 +25,7 @@ use crate::data::set_property;
 
 const INTERFACE: &str = "io.edgehog.devicemanager.HardwareInfo";
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, PartialEq)]
 pub struct HardwareInfo {
     pub cpu: Cpu,
     pub mem: Mem,
@@ -49,7 +49,7 @@ impl HardwareInfo {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Cpu {
     pub architecture: String,
@@ -104,7 +104,7 @@ impl Cpu {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Mem {
     pub total_bytes: Option<i64>,
