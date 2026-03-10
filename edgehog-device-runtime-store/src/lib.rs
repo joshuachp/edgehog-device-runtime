@@ -31,3 +31,23 @@ pub mod conversions;
 pub mod db;
 pub mod models;
 pub mod schema;
+
+#[cfg(test)]
+pub(crate) mod tests {
+    macro_rules! with_insta {
+        ($asserts:block) => {
+            ::insta::with_settings!({
+                snapshot_path => concat!(env!("CARGO_MANIFEST_DIR"), "/snapshots")
+            }, $asserts);
+        };
+    }
+
+    pub(crate) use with_insta;
+
+    #[test]
+    fn use_macro() {
+        self::with_insta!({
+            insta::assert_snapshot!("using the macro");
+        });
+    }
+}

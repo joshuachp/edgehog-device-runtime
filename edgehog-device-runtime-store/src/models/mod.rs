@@ -29,6 +29,7 @@ use crate::conversions::SqlUuid;
 
 #[cfg(feature = "containers")]
 pub mod containers;
+pub mod job;
 
 type ById<'a, Id> = Eq<Id, &'a SqlUuid>;
 type FilterById<'a, Table, Id> = Filter<Table, ById<'a, Id>>;

@@ -17,109 +17,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::str::FromStr;
-use std::time::Duration;
 
-use eyre::{Context, OptionExt, eyre};
+use eyre::{Context, eyre};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
 use url::Url;
 use uuid::Uuid;
 
 use super::FileOptions;
-use super::interface::{DeviceToServer, ServerToDevice};
+use super::interface::DeviceToServer;
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct DownloadReq {
-    pub(super) id: Uuid,
-    pub(super) url: Url,
-    pub(super) headers: HeaderMap,
-    pub(super) progress: bool,
-    pub(super) digest_type: FileDigest,
-    pub(super) digest: Vec<u8>,
-    pub(super) ttl: Option<Duration>,
-    pub(super) compression: Option<Compression>,
-    pub(super) file_size: u64,
-    pub(super) permission: FilePermissions,
-    pub(super) destination: Target,
+pub(crate) mod download;
+
+#[repr(u8)]
+enum JobTag {
+    Download = 0,
+    Upload = 1,
 }
 
-impl From<DownloadReq> for FileOptions {
-    fn from(value: DownloadReq) -> Self {
-        FileOptions {
-            id: value.id,
-            file_size: value.file_size,
-            file_digest: value.digest_type,
-            #[cfg(unix)]
-            perm: value.permission,
-        }
-    }
-}
-
-impl TryFrom<ServerToDevice> for DownloadReq {
-    type Error = eyre::Error;
-
-    fn try_from(value: ServerToDevice) -> Result<Self, Self::Error> {
-        let ServerToDevice {
-            id,
-            url,
-            http_header_key,
-            http_header_value,
-            compression,
-            file_size_bytes,
-            progress,
-            digest,
-            ttl_seconds,
-            file_mode,
-            user_id,
-            group_id,
-            destination,
-        } = value;
-
-        let headers = http_header_key
-            .into_iter()
-            .zip(http_header_value)
-            .map(|(k, v)| -> eyre::Result<(HeaderName, HeaderValue)> {
-                let k = HeaderName::try_from(k)?;
-                let mut v = HeaderValue::try_from(v)?;
-
-                if k == AUTHORIZATION {
-                    v.set_sensitive(true);
-                }
-
-                Ok((k, v))
-            })
-            .collect::<eyre::Result<HeaderMap>>()?;
-
-        let ttl = conv_or_default(ttl_seconds, 0)
-            .wrap_err("couldn't convert ttl_seconds to duration")?
-            .map(Duration::from_secs);
-
-        let permission = FilePermissions::from_event(file_mode, user_id, group_id)?;
-
-        let file_size = u64::try_from(file_size_bytes).wrap_err("couldn't convert file size")?;
-
-        let (digest_type, digest) = digest
-            .split_once(':')
-            .ok_or_eyre("couldn't parse digest, missing ':' delimiter")?;
-
-        let digest = hex::decode(digest).wrap_err("couldn't decode hex digest")?;
-
-        let compression = (!compression.is_empty())
-            .then(|| compression.parse())
-            .transpose()?;
-
-        Ok(Self {
-            id: id.parse()?,
-            url: url.parse()?,
-            headers,
-            compression,
-            file_size,
-            progress,
-            digest_type: digest_type.parse()?,
-            digest,
-            ttl,
-            destination: destination.parse()?,
-            permission,
-        })
+impl From<JobTag> for i32 {
+    fn from(value: JobTag) -> Self {
+        value as i32
     }
 }
 
@@ -181,9 +98,16 @@ impl TryFrom<DeviceToServer> for UploadReq {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(u8)]
 pub(crate) enum Target {
-    Storage,
-    Stream,
+    Storage = 0,
+    Stream = 1,
+}
+
+impl From<Target> for u8 {
+    fn from(value: Target) -> Self {
+        value as u8
+    }
 }
 
 impl FromStr for Target {
@@ -199,8 +123,15 @@ impl FromStr for Target {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[repr(u8)]
 pub(crate) enum Compression {
-    TarGz,
+    TarGz = 0,
+}
+
+impl From<Compression> for u8 {
+    fn from(value: Compression) -> Self {
+        value as u8
+    }
 }
 
 impl FromStr for Compression {
@@ -215,10 +146,10 @@ impl FromStr for Compression {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct FilePermissions {
-    pub(super) mode: Option<u32>,
-    pub(super) user_id: Option<u32>,
-    pub(super) group_id: Option<u32>,
+pub(crate) struct FilePermissions {
+    pub(crate) mode: Option<u32>,
+    pub(crate) user_id: Option<u32>,
+    pub(crate) group_id: Option<u32>,
 }
 
 impl FilePermissions {
@@ -241,8 +172,15 @@ impl FilePermissions {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum FileDigest {
-    Sha256,
+#[repr(u8)]
+pub(crate) enum FileDigest {
+    Sha256 = 0,
+}
+
+impl From<FileDigest> for u8 {
+    fn from(value: FileDigest) -> Self {
+        value as u8
+    }
 }
 
 impl From<FileDigest> for aws_lc_rs::digest::Context {
@@ -285,33 +223,6 @@ mod tests {
     use super::*;
 
     #[fixture]
-    pub(crate) fn download_req() -> DownloadReq {
-        DownloadReq {
-            id: "6389218e-0e05-4587-96e3-3e6e2b522a2b".parse().unwrap(),
-            url: "https://s3.example.com".parse().unwrap(),
-            headers: HeaderMap::from_iter([(
-                AUTHORIZATION,
-                HeaderValue::from_static(
-                    "Bearer tXYBVo1eA+8MTQTgFovzb9/nKej1d7zS4/k64l3Tm7tOkzxGemBJqDKN5lhEr1ARkb6AXpMqRc6FKo3kk800kA==",
-                ),
-            )]),
-            file_size: 4096,
-            compression: Some(Compression::TarGz),
-            progress: true,
-            digest_type: FileDigest::Sha256,
-            digest: hex::decode("28babb1cdf8aea6b62acc1097fdc83482cbf6e11c4fe7dcb39ae1682776baec5")
-                .unwrap(),
-            ttl: None,
-            permission: FilePermissions {
-                mode: Some(544),
-                user_id: Some(1000),
-                group_id: Some(100),
-            },
-            destination: Target::Storage,
-        }
-    }
-
-    #[fixture]
     pub(crate) fn upload_req() -> UploadReq {
         UploadReq {
             id: "6389218e-0e05-4587-96e3-3e6e2b522a2b".parse().unwrap(),
@@ -329,14 +240,6 @@ mod tests {
             source: Target::Storage,
         }
     }
-
-    #[rstest]
-    fn download_try_from_event(fs_server_to_device: ServerToDevice, download_req: DownloadReq) {
-        let req = DownloadReq::try_from(fs_server_to_device).unwrap();
-
-        assert_eq!(req, download_req);
-    }
-
     #[rstest]
     fn upload_try_from_event(fs_device_to_server: DeviceToServer, upload_req: UploadReq) {
         let req = UploadReq::try_from(fs_device_to_server).unwrap();

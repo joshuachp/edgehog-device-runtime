@@ -36,6 +36,7 @@ pub mod error;
 pub mod file_transfer;
 #[cfg(feature = "forwarder")]
 mod forwarder;
+mod jobs;
 #[cfg(all(feature = "zbus", target_os = "linux"))]
 mod led_behavior;
 #[cfg(all(feature = "zbus", target_os = "linux"))]
@@ -77,7 +78,7 @@ pub struct DeviceManagerOptions {
 pub(crate) mod tests {
     use insta::assert_snapshot;
 
-    macro_rules! with_settings {
+    macro_rules! with_insta {
         ($asserts:block) => {
             ::insta::with_settings!({
                 snapshot_path => concat!(env!("CARGO_MANIFEST_DIR"), "/snapshots")
@@ -85,11 +86,11 @@ pub(crate) mod tests {
         };
     }
 
-    pub(crate) use with_settings;
+    pub(crate) use with_insta;
 
     #[test]
     fn use_macro() {
-        self::with_settings!({
+        self::with_insta!({
             assert_snapshot!("using the macro");
         });
     }

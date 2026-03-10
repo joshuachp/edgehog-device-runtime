@@ -19,9 +19,16 @@
 //! Database schema definitions
 
 #[cfg(feature = "containers")]
+#[expect(missing_docs)]
 pub mod containers;
+#[expect(missing_docs)]
+pub mod runtime;
 
-/// Embedded migrations
+/// Embedded runtime migrations
+pub(crate) const RUNTIME_MIGRATIONS: diesel_migrations::EmbeddedMigrations =
+    diesel_migrations::embed_migrations!("migrations/runtime");
+
+/// Embedded containers migrations
 #[cfg(feature = "containers")]
 pub(crate) const CONTAINER_MIGRATIONS: diesel_migrations::EmbeddedMigrations =
-    diesel_migrations::embed_migrations!("migrations");
+    diesel_migrations::embed_migrations!("migrations/containers");

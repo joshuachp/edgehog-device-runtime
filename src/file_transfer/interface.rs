@@ -112,7 +112,7 @@ pub(crate) mod tests {
     use astarte_device_sdk::chrono::Utc;
     use rstest::{fixture, rstest};
 
-    use crate::tests::with_settings;
+    use crate::tests::with_insta;
 
     use super::*;
 
@@ -186,7 +186,7 @@ pub(crate) mod tests {
 
         assert_eq!(download, fs_server_to_device);
 
-        with_settings!({
+        with_insta!({
             insta::assert_debug_snapshot!(data);
         });
     }
@@ -210,7 +210,7 @@ pub(crate) mod tests {
 
         assert_eq!(upload, fs_device_to_server);
 
-        with_settings!({
+        with_insta!({
             insta::assert_debug_snapshot!(data);
         });
     }

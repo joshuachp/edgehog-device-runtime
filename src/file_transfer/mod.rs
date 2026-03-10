@@ -28,7 +28,8 @@ use self::file_system::FileOptions;
 use self::file_system::store::{FileStorage, Fs, Limits};
 use self::file_system::stream::{Pipe, Streaming, SysPipe};
 use self::interface::FileTransferEvent;
-use self::request::{DownloadReq, Target, UploadReq};
+use self::request::download::DownloadReq;
+use self::request::{Target, UploadReq};
 
 mod file_system;
 pub(crate) mod interface;
