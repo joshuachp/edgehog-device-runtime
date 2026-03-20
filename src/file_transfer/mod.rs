@@ -43,6 +43,7 @@ use self::request::download::Download;
 use self::request::upload::Upload;
 use self::request::{Request, Target};
 
+mod compression;
 mod file_system;
 pub(crate) mod interface;
 mod request;

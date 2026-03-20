@@ -23,7 +23,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use eyre::WrapErr;
-use pin_project_lite::pin_project;
+use pin_project::pin_project;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, AsyncSeek, AsyncWrite, BufReader};
 use tracing::{info, instrument, trace};
@@ -180,15 +180,14 @@ impl<F> FileStorage<F> {
     }
 }
 
-pin_project! {
-    #[derive(Debug)]
-    pub(crate) struct WriteHandle {
-        id: Uuid,
-        current_size: u64,
-        // TODO limit the size of the file
-        #[pin]
-        file: tokio::fs::File,
-    }
+#[derive(Debug)]
+#[pin_project]
+pub(crate) struct WriteHandle {
+    id: Uuid,
+    current_size: u64,
+    // TODO limit the size of the file
+    #[pin]
+    file: tokio::fs::File,
 }
 
 impl WriteHandle {
@@ -253,13 +252,12 @@ impl AsyncSeek for WriteHandle {
     }
 }
 
-pin_project! {
-    #[derive(Debug)]
-    pub(crate) struct Limit<W> {
-        remaining: u64,
-        #[pin]
-        inner: W,
-    }
+#[derive(Debug)]
+#[pin_project]
+pub(crate) struct Limit<W> {
+    remaining: u64,
+    #[pin]
+    inner: W,
 }
 
 impl<W> Limit<W> {
