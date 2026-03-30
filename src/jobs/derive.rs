@@ -16,6 +16,28 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+pub(crate) mod uuid {
+    use minicbor::Encode;
+    use minicbor::decode::{self, Decoder};
+    use minicbor::encode::{self, Encoder, Write};
+    use uuid::Uuid;
+
+    pub(crate) fn decode<'b, Ctx>(
+        d: &mut Decoder<'b>,
+        ctx: &mut Ctx,
+    ) -> Result<Uuid, decode::Error> {
+        d.decode_with(ctx).map(|url| Uuid::from_bytes(url))
+    }
+
+    pub(crate) fn encode<Ctx, W: Write>(
+        v: &Uuid,
+        e: &mut Encoder<W>,
+        ctx: &mut Ctx,
+    ) -> Result<(), encode::Error<W::Error>> {
+        v.as_bytes().encode(e, ctx)
+    }
+}
+
 pub(crate) mod as_secs_opt {
     use std::time::Duration;
 

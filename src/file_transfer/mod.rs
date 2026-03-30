@@ -22,6 +22,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use astarte_device_sdk::Client;
+use edgehog_store::models::job::Job;
 use edgehog_store::models::job::job_type::JobType;
 use eyre::Context;
 use tokio::sync::Notify;
@@ -72,10 +73,9 @@ impl<C> Receiver<C> {
 
 impl<C> Persisted for Receiver<C>
 where
-    C: astarte_device_sdk::Client + Send + Sync + 'static,
+    C: Client + Send + Sync + 'static,
 {
     type Msg = FileTransferRequest;
-    type Event = Request;
 
     fn task() -> &'static str {
         "file-transfer"
@@ -97,42 +97,44 @@ where
     }
 
     #[instrument(skip_all)]
-    async fn validate_job(&mut self, msg: &Self::Msg) -> eyre::Result<Self::Event> {
+    async fn validate_job<'a>(&mut self, msg: &'a Self::Msg) -> eyre::Result<Job> {
         match msg {
             FileTransferRequest::Download(server_to_device) => {
                 let download = Download::try_from(server_to_device)?;
 
                 info!("file download received");
 
-                Ok(Request::Download(download))
+                Job::try_from(download)
             }
             FileTransferRequest::Upload(device_to_server) => {
                 let upload = Upload::try_from(device_to_server)?;
 
                 info!("file upload received");
 
-                Ok(Request::Upload(upload))
+                Job::try_from(upload)
             }
         }
     }
 
     #[instrument(skip_all)]
     async fn fail_job(&mut self, msg: &Self::Msg, report: eyre::Report) {
-        if let Err(e) = FileTransferResponse::validation_error(FileTransferId::from(msg), report)
+        let send = FileTransferResponse::validation_error(FileTransferId::from(msg), report)
             .send(&mut self.device)
-            .await
-        {
-            error!(%e, "response send error")
+            .await;
+
+        if let Err(error) = send {
+            error!(%error, "response send error")
         }
     }
 
     #[instrument(skip_all)]
-    async fn handle_backpressure(&mut self, job: &Self::Event) {
-        if let Err(e) = FileTransferResponse::busy_error(FileTransferId::from(job))
+    async fn handle_backpressure(&mut self, message: &Self::Msg) {
+        let send = FileTransferResponse::busy_error(FileTransferId::from(message))
             .send(&mut self.device)
-            .await
-        {
-            error!(%e, "response send error")
+            .await;
+
+        if let Err(error) = send {
+            error!(%error, "response send error")
         }
     }
 }
@@ -167,7 +169,7 @@ impl<F, S, C> FileTransfer<F, S, C> {
     where
         F: Space,
         S: Pipe,
-        C: astarte_device_sdk::Client + Send + Sync + 'static,
+        C: Client + Send + Sync + 'static,
     {
         self.storage.init().await?;
 
@@ -187,7 +189,7 @@ impl<F, S, C> FileTransfer<F, S, C> {
     where
         F: Space,
         S: Pipe,
-        C: astarte_device_sdk::Client + Send + Sync + 'static,
+        C: Client + Send + Sync + 'static,
     {
         while let Some(job) = self
             .queue
@@ -204,11 +206,11 @@ impl<F, S, C> FileTransfer<F, S, C> {
     }
 
     #[instrument(skip_all, fields(id = %job.id()))]
-    async fn handle(&mut self, job: Request) -> eyre::Result<()>
+    async fn handle(&mut self, job: Request<'_>) -> eyre::Result<()>
     where
         F: Space,
         S: Pipe,
-        C: astarte_device_sdk::Client + Send + Sync + 'static,
+        C: Client + Send + Sync + 'static,
     {
         let id = FileTransferId::from(&job);
 
@@ -227,18 +229,19 @@ impl<F, S, C> FileTransfer<F, S, C> {
     }
 
     #[instrument(skip_all)]
-    async fn download(&mut self, req: Download) -> eyre::Result<()>
+    async fn download(&mut self, req: Download<'_>) -> eyre::Result<()>
     where
         F: Space,
         S: Pipe,
     {
-        match req.destination_type {
+        match req.destination {
             Target::Storage => self.download_store(req).await,
             Target::Stream => self.download_stream(req).await,
+            Target::FileSystem { path } => todo!(),
         }
     }
 
-    async fn download_store(&mut self, download: Download) -> eyre::Result<()>
+    async fn download_store(&mut self, download: Download<'_>) -> eyre::Result<()>
     where
         F: Space,
     {
@@ -277,7 +280,7 @@ impl<F, S, C> FileTransfer<F, S, C> {
         Ok(())
     }
 
-    async fn download_stream(&mut self, download: Download) -> eyre::Result<()>
+    async fn download_stream(&mut self, download: Download<'_>) -> eyre::Result<()>
     where
         F: Space,
         S: Pipe,
@@ -308,13 +311,14 @@ impl<F, S, C> FileTransfer<F, S, C> {
     }
 
     #[instrument(skip_all)]
-    async fn upload(&mut self, req: Upload) -> eyre::Result<()>
+    async fn upload(&mut self, req: Upload<'_>) -> eyre::Result<()>
     where
         S: Pipe,
     {
-        match req.source_type {
+        match req.source {
             Target::Storage => self.upload_store(req).await,
             Target::Stream => self.upload_stream(req).await,
+            Target::FileSystem { path } => todo!(),
         }
     }
 
@@ -344,7 +348,7 @@ impl<F, S, C> FileTransfer<F, S, C> {
     }
 
     #[instrument(skip_all)]
-    async fn upload_stream(&mut self, req: Upload) -> eyre::Result<()>
+    async fn upload_stream(&mut self, req: Upload<'_>) -> eyre::Result<()>
     where
         S: Pipe,
     {
@@ -429,7 +433,7 @@ mod tests {
         )
     }
 
-    fn mk_download_req(url: &str, headers: HeaderMap, content: &[u8]) -> Request {
+    fn mk_download_req(url: &str, headers: HeaderMap, content: &[u8]) -> Request<'static> {
         let mut digest = digest::Context::new(&digest::SHA256);
         digest.update(content);
         let digest = digest.finish();
@@ -445,8 +449,7 @@ mod tests {
             encoding: None,
             file_size: content.len().try_into().unwrap(),
             permission: FilePermissions::default(),
-            destination_type: Target::Storage,
-            destination: String::new(),
+            destination: Target::Storage,
         })
     }
 
@@ -462,12 +465,12 @@ mod tests {
     struct MockedFtCall<'a> {
         first_call: Mock<'a>,
         second_call: Option<Mock<'a>>,
-        req: Request,
+        req: Request<'a>,
         content: Vec<u8>,
     }
 
     impl<'a> MockedFtCall<'a> {
-        fn new(call_get: Mock<'a>, event: Request, content: Vec<u8>) -> Self {
+        fn new(call_get: Mock<'a>, event: Request<'a>, content: Vec<u8>) -> Self {
             Self {
                 first_call: call_get,
                 req: event,
@@ -597,15 +600,14 @@ mod tests {
         MockedFtCall::with_second_call(call_get, call_get_full, req, content)
     }
 
-    fn mk_upload_req(url: &str, headers: HeaderMap) -> Request {
+    fn mk_upload_req(url: &str, headers: HeaderMap) -> Request<'static> {
         Request::Upload(Upload {
             id: Uuid::new_v4(),
             url: url.parse().unwrap(),
             headers,
             progress: true,
             encoding: None,
-            source_type: Target::Storage,
-            source: Uuid::new_v4().to_string(),
+            source: Target::Storage,
         })
     }
 

@@ -29,13 +29,15 @@ pub(crate) const INTERFACE: &str = "io.edgehog.devicemanager.fileTransfer.Capabi
 pub(crate) const TAR_GZ: &str = "tar.gz";
 /// Storage target
 pub(crate) const STORAGE_TARGET: &str = "storage";
-/// STREAMING target
+/// Streaming target
 pub(crate) const STREAMING_TARGET: &str = "streaming";
+/// Filesystem target
+pub(crate) const FILESYSTEM_TARGET: &str = "filesystem";
 /// Capabilities of the device
-pub(crate) const CAPABILITIES: Capabilities<1, 2> = Capabilities {
+pub(crate) const CAPABILITIES: Capabilities<1, 3> = Capabilities {
     encodings: [TAR_GZ],
     unix_permissions: true,
-    targets: [STORAGE_TARGET, STREAMING_TARGET],
+    targets: [STORAGE_TARGET, STREAMING_TARGET, FILESYSTEM_TARGET],
 };
 
 #[derive(Debug)]

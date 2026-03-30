@@ -43,19 +43,16 @@ impl FileTransferResponse {
         }
     }
 
-    pub(crate) fn validation_error(
-        id: FileTransferId<impl std::fmt::Display>,
-        report: eyre::Report,
-    ) -> Self {
+    pub(crate) fn validation_error(id: FileTransferId<&str>, report: eyre::Report) -> Self {
         Self {
             id: id.uuid().to_string(),
             ty: id.direction(),
             code: to_errno(io::ErrorKind::InvalidInput),
-            message: report.to_string(),
+            message: format!("{report:#}"),
         }
     }
 
-    pub(crate) fn busy_error(id: FileTransferId) -> Self {
+    pub(crate) fn busy_error(id: FileTransferId<&str>) -> Self {
         Self {
             id: id.uuid().to_string(),
             ty: id.direction(),

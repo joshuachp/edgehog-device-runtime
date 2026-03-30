@@ -17,6 +17,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use astarte_device_sdk::{AstarteData, FromEvent, IntoAstarteObject};
+use file_transfer::request::Request;
 use uuid::Uuid;
 
 use crate::file_transfer::{self, interface::request::FileTransferRequest};
@@ -56,24 +57,12 @@ impl<'a> From<&'a FileTransferRequest> for FileTransferId<&'a str> {
     }
 }
 
-impl From<&file_transfer::request::Request> for FileTransferId {
-    fn from(value: &file_transfer::request::Request) -> Self {
+impl<'a> From<&'a Request<'_>> for FileTransferId {
+    fn from(value: &'a Request) -> Self {
         match value {
-            file_transfer::request::Request::Download(d) => Self::Download(d.id),
-            file_transfer::request::Request::Upload(u) => Self::Upload(u.id),
+            Request::Download(d) => Self::Download(d.id),
+            Request::Upload(u) => Self::Upload(u.id),
         }
-    }
-}
-
-impl From<&file_transfer::request::upload::Upload> for FileTransferId {
-    fn from(value: &file_transfer::request::upload::Upload) -> Self {
-        Self::Upload(value.id)
-    }
-}
-
-impl From<&file_transfer::request::download::Download> for FileTransferId {
-    fn from(value: &file_transfer::request::download::Download) -> Self {
-        Self::Upload(value.id)
     }
 }
 

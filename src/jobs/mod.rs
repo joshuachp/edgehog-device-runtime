@@ -61,9 +61,9 @@ impl Queue {
     }
 
     #[instrument(skip_all)]
-    pub async fn insert<'a, J>(&self, job: &'a J) -> eyre::Result<()>
+    pub async fn insert<J>(&self, job: J) -> eyre::Result<()>
     where
-        &'a J: TryInto<Job, Error = eyre::Report>,
+        J: TryInto<Job, Error = eyre::Report>,
     {
         let job = job.try_into()?;
 
