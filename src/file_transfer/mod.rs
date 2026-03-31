@@ -21,9 +21,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use astarte_device_sdk::Client;
 use edgehog_store::models::job::job_type::JobType;
-use eyre::{Context, OptionExt};
-use futures::StreamExt;
+use eyre::Context;
 use tokio::sync::Notify;
 use tokio_util::io::ReaderStream;
 use tracing::{debug, error, info, instrument};
@@ -37,18 +37,18 @@ use crate::file_transfer::interface::status::FileTransferResponse;
 use crate::http::FtHttpClient;
 use crate::jobs::Queue;
 
-use self::compression::tar_gz::TarGzWriter;
 use self::digest::Digest;
+use self::encoding::tar_gz::TarGzBuilder;
 use self::file_system::FileOptions;
 use self::file_system::store::{FileStorage, Fs, Space};
 use self::file_system::stream::{Pipe, Streaming, SysPipe};
 use self::interface::capabilities::CAPABILITIES;
 use self::request::download::Download;
 use self::request::upload::Upload;
-use self::request::{Request, Target};
+use self::request::{Encoding, Request, Target};
 
-mod compression;
 mod digest;
+mod encoding;
 mod file_system;
 pub(crate) mod interface;
 mod request;
@@ -233,81 +233,12 @@ impl<F, S, C> FileTransfer<F, S, C> {
         S: Pipe,
     {
         match req.destination_type {
-            Target::Storage => self.store(req).await,
-            Target::Stream => self.stream(req).await,
+            Target::Storage => self.download_store(req).await,
+            Target::Stream => self.download_stream(req).await,
         }
     }
 
-    #[instrument(skip_all)]
-    async fn upload(&mut self, req: Upload) -> eyre::Result<()>
-    where
-        S: Pipe,
-    {
-        match req.source_type {
-            Target::Storage => {
-                let id = Uuid::parse_str(&req.source)?;
-
-                if let Some(encoding) = req.encoding {
-                    let (rx, tx) = tokio::io::simplex(8 * 1024);
-
-                    let (mut walk, base_path) = self
-                        .storage
-                        .walk(&id)
-                        .await
-                        .ok_or_eyre("file doesn't exists")?;
-
-                    match encoding {
-                        request::Encoding::TarGz => {
-                            tokio::task::spawn(async move {
-                                let mut writer = TarGzWriter::new(tx);
-
-                                while let Some(item) = walk.next().await {
-                                    let item = item?;
-
-                                    writer.append(&base_path, item.path()).await?;
-                                }
-
-                                writer.finalize().await?;
-
-                                Ok::<_, eyre::Report>(())
-                            });
-
-                            let reader = tokio_util::io::ReaderStream::new(rx);
-
-                            let _ = self.client.upload(&req.url, req.headers, reader).await?;
-                        }
-                    }
-                } else {
-                    let file = self.storage.open_read(&id).await?;
-
-                    let body_stream = ReaderStream::new(file);
-
-                    let _ = self
-                        .client
-                        .upload(&req.url, req.headers, body_stream)
-                        .await?;
-                }
-
-                Ok(())
-            }
-            Target::Stream => {
-                let id = Uuid::parse_str(&req.source)?;
-
-                let file = self.stream.create_reader(&id).await?;
-
-                let body_stream = ReaderStream::new(file);
-
-                let _ = self
-                    .client
-                    .upload(&req.url, req.headers, body_stream)
-                    .await?;
-
-                Ok(())
-            }
-        }
-    }
-
-    async fn store(&mut self, download: Download) -> eyre::Result<()>
+    async fn download_store(&mut self, download: Download) -> eyre::Result<()>
     where
         F: Space,
     {
@@ -346,7 +277,7 @@ impl<F, S, C> FileTransfer<F, S, C> {
         Ok(())
     }
 
-    async fn stream(&mut self, download: Download) -> eyre::Result<()>
+    async fn download_stream(&mut self, download: Download) -> eyre::Result<()>
     where
         F: Space,
         S: Pipe,
@@ -376,9 +307,61 @@ impl<F, S, C> FileTransfer<F, S, C> {
         Ok(())
     }
 
+    #[instrument(skip_all)]
+    async fn upload(&mut self, req: Upload) -> eyre::Result<()>
+    where
+        S: Pipe,
+    {
+        match req.source_type {
+            Target::Storage => self.upload_store(req).await,
+            Target::Stream => self.upload_stream(req).await,
+        }
+    }
+
+    #[instrument(skip_all)]
+    async fn upload_store(&mut self, req: Upload) -> eyre::Result<()> {
+        let id = Uuid::parse_str(&req.source)?;
+
+        match req.encoding {
+            Some(Encoding::TarGz) => {
+                let paths = self.storage.find_paths(&id).await?;
+
+                let reader = TarGzBuilder::spawn(paths);
+                let reader = tokio_util::io::ReaderStream::new(reader);
+
+                self.client.upload(&req.url, req.headers, reader).await?;
+            }
+            None => {
+                let reader = self.storage.open_read(&id).await?;
+
+                let reader = ReaderStream::new(reader);
+
+                self.client.upload(&req.url, req.headers, reader).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    #[instrument(skip_all)]
+    async fn upload_stream(&mut self, req: Upload) -> eyre::Result<()>
+    where
+        S: Pipe,
+    {
+        let file = self.stream.create_reader(&req.id).await?;
+
+        let body_stream = ReaderStream::new(file);
+
+        self.client
+            .upload(&req.url, req.headers, body_stream)
+            .await?;
+
+        Ok(())
+    }
+
     async fn job_done(&mut self, id: FileTransferId) -> Result<(), eyre::Error>
     where
-        C: astarte_device_sdk::Client + Send + Sync + 'static,
+        C: Client + Send + Sync + 'static,
     {
         self.queue
             .update(
@@ -397,13 +380,13 @@ impl<F, S, C> FileTransfer<F, S, C> {
             .delete(id.uuid())
             .await
             .wrap_err("couldn't clean up job")?;
+
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::iter;
     use std::time::Duration;
 
     use astarte_device_sdk::store::SqliteStore;
@@ -622,14 +605,14 @@ mod tests {
             progress: true,
             encoding: None,
             source_type: Target::Storage,
-            source: String::new(),
+            source: Uuid::new_v4().to_string(),
         })
     }
 
     async fn mk_upload<'a>(mock_fs: &'a MockServer) -> MockedFtCall<'a> {
         let url = mock_fs.url("/file_upload");
         let size = 1024usize;
-        let content: String = iter::repeat_n("ciao", size / 4).collect();
+        let content = "a".repeat(size);
 
         let headers = mk_headers();
 
@@ -789,7 +772,7 @@ mod tests {
         let (mut transfer, dir) = mk_transfer("upload", device).await;
 
         tokio::fs::write(
-            dir.path().join(mock_upload_event.req.id().to_string()),
+            dir.path().join(mock_upload_event.req.target()),
             mock_upload_event.content,
         )
         .await
