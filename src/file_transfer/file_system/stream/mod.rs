@@ -57,14 +57,8 @@ where
     S: Pipe,
 {
     #[instrument(skip_all, fields(id = %opt.id))]
-    pub(crate) async fn open_writer(
-        &self,
-        opt: &FileOptions,
-    ) -> eyre::Result<(S::Writer, aws_lc_rs::digest::Context)> {
-        let writer = self.sys.open_writer(opt).await?;
-        let digest = aws_lc_rs::digest::Context::from(opt.file_digest);
-
-        Ok((writer, digest))
+    pub(crate) async fn open_writer(&self, opt: &FileOptions) -> eyre::Result<S::Writer> {
+        self.sys.open_writer(opt).await
     }
 
     #[instrument(skip(self))]

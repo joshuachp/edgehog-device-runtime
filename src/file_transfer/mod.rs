@@ -6,7 +6,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//    http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,14 +18,12 @@
 
 //! Transfer files from and to the Device
 
-use std::io::SeekFrom;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use edgehog_store::models::job::job_type::JobType;
 use eyre::{Context, OptionExt};
 use futures::StreamExt;
-use tokio::io::AsyncSeekExt;
 use tokio::sync::Notify;
 use tokio_util::io::ReaderStream;
 use tracing::{debug, error, info, instrument};
@@ -40,6 +38,7 @@ use crate::http::FtHttpClient;
 use crate::jobs::Queue;
 
 use self::compression::tar_gz::TarGzWriter;
+use self::digest::Digest;
 use self::file_system::FileOptions;
 use self::file_system::store::{FileStorage, Fs, Space};
 use self::file_system::stream::{Pipe, Streaming, SysPipe};
@@ -49,6 +48,7 @@ use self::request::upload::Upload;
 use self::request::{Request, Target};
 
 mod compression;
+mod digest;
 mod file_system;
 pub(crate) mod interface;
 mod request;
@@ -319,30 +319,27 @@ impl<F, S, C> FileTransfer<F, S, C> {
 
         let opt = FileOptions::from(&download);
 
-        let (mut file, mut digest) = self.storage.create_write_handle(&opt).await?;
+        let file = self.storage.create_write_handle(&opt).await?;
 
-        let total_len = download.encoding.is_none().then_some(download.file_size);
+        let current_size = file.current_size();
+        let total_size = download.download_length();
 
         let mut file_resp = self
             .client
-            .download(
-                &download.url,
-                download.headers,
-                file.current_size(),
-                total_len,
-            )
+            .download(&download.url, download.headers, current_size, total_size)
             .await
             .wrap_err("download request error")?;
 
-        if file_resp.start() != file.current_size() {
-            file.seek(SeekFrom::Start(file_resp.start())).await?;
-        }
-
         // limit to maximum uncompressed file size
-        let limit = file_resp.total_length().unwrap_or(download.file_size);
+        let total = file_resp.total_length().unwrap_or(download.file_size);
 
-        let mut limit = Limit::new(limit, &mut file);
-        file_resp.write_chunks(&mut limit, &mut digest).await?;
+        // The digest will read till the start position
+        let writer = Digest::from_read(file, download.digest_type, file_resp.start()).await?;
+        let mut writer = Limit::new(writer, total);
+
+        file_resp.write_chunks(&mut writer).await?;
+
+        let file = writer.into_inner().into_inner(&download.digest)?;
 
         self.storage.finalize_write(file, &opt).await?;
 
@@ -356,9 +353,9 @@ impl<F, S, C> FileTransfer<F, S, C> {
     {
         let opt = FileOptions::from(&download);
 
-        let (mut file, mut digest) = self.stream.open_writer(&opt).await?;
+        let pipe = self.stream.open_writer(&opt).await?;
 
-        let total_len = download.encoding.is_none().then_some(download.file_size);
+        let total_len = download.download_length();
 
         let mut file_resp = self
             .client
@@ -366,13 +363,15 @@ impl<F, S, C> FileTransfer<F, S, C> {
             .await
             .wrap_err("download request error")?;
 
+        let total = file_resp.total_length().unwrap_or(download.file_size);
+
         // limit to maximum uncompressed file size
-        let limit = file_resp.rem_len().unwrap_or(download.file_size);
+        let writer = Digest::new(pipe, download.digest_type);
+        let mut writer = Limit::new(writer, total);
 
-        let mut limit = Limit::new(limit, &mut file);
-        file_resp.write_chunks(&mut limit, &mut digest).await?;
+        file_resp.write_chunks(&mut writer).await?;
 
-        // TODO: finalize the digest
+        writer.into_inner().into_inner(&download.digest)?;
 
         Ok(())
     }
@@ -421,6 +420,8 @@ mod tests {
     use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
     use rstest::rstest;
     use tempdir::TempDir;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
     use uuid::Uuid;
 
     use super::request::{FileDigest, FilePermissions};
@@ -722,6 +723,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn should_download_full_when_unsatisfiable() {
+        tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer().with_test_writer())
+            .with(tracing_error::ErrorLayer::default())
+            .init();
+
         let server = MockServer::start_async().await;
         let mock_download_event = mk_download_not_satisfied(&server).await;
 
