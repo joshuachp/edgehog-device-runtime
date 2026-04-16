@@ -44,6 +44,8 @@ pub struct Job {
     pub version: i32,
     /// Tag to identify the type of data stored
     pub tag: i32,
+    /// When the job should be scheduled
+    pub schedule_at: Option<i64>,
     /// Serialized additional data for the job
     pub data: Vec<u8>,
 }

@@ -18,9 +18,11 @@
 
 //! Job queue
 
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
 use diesel::{delete, insert_into, prelude::*, update};
 use edgehog_store::conversions::SqlUuid;
-use edgehog_store::db::Handle;
+use edgehog_store::db::{Handle, HandleError};
 use edgehog_store::models::job::Job;
 use edgehog_store::models::job::job_type::JobType;
 use edgehog_store::models::job::status::JobStatus;
@@ -29,7 +31,10 @@ use eyre::Context;
 use tracing::{debug, instrument};
 use uuid::Uuid;
 
+use self::timestamp::Unix;
+
 pub(crate) mod derive;
+pub(crate) mod timestamp;
 
 /// Persistent Job Queue
 #[derive(Debug, Clone)]
@@ -125,6 +130,57 @@ impl Queue {
         Ok(job)
     }
 
+    /// Returns the next instant to sleep until to schedule the job
+    ///
+    /// It will return an instant at the nth second.
+    #[instrument(skip(self))]
+    pub async fn next_schedule(&self, job_type: JobType) -> eyre::Result<Option<Unix>> {
+        let first = self
+            .db
+            .for_read(move |read| {
+                job_queue::table
+                    .select(job_queue::schedule_at.assume_not_null())
+                    .filter(job_queue::schedule_at.is_not_null())
+                    .filter(job_queue::job_type.eq(job_type))
+                    .filter(job_queue::status.eq(JobStatus::Pending))
+                    .order_by(job_queue::schedule_at.asc())
+                    .first::<i64>(read)
+                    .optional()
+                    .map_err(HandleError::Query)
+            })
+            .await?;
+
+        first.map(Unix::try_from).transpose()
+    }
+
+    #[instrument(skip(self))]
+    pub async fn next_scheduled_job(&self, job_type: JobType) -> eyre::Result<Option<Job>> {
+        let job = self
+            .db
+            .for_read(move |write| {
+                let Some(mut job) = Job::query()
+                    .filter(job_queue::schedule_at.is_not_null())
+                    .filter(job_queue::schedule_at.le(diesel::dsl::now))
+                    .filter(job_queue::job_type.eq(job_type))
+                    .filter(job_queue::status.eq(JobStatus::Pending))
+                    .order_by(job_queue::schedule_at.asc())
+                    .first(write)
+                    .optional()?
+                else {
+                    return Ok(None);
+                };
+
+                job.status = JobStatus::InProgress;
+
+                update(job_queue::table).set(&job).execute(write)?;
+
+                Ok(Some(job))
+            })
+            .await?;
+
+        Ok(job)
+    }
+
     #[instrument(skip_all)]
     pub async fn update(&self, id: &Uuid, tag: i32, status: JobStatus) -> eyre::Result<()> {
         let id = SqlUuid::new(*id);
@@ -167,10 +223,13 @@ impl Queue {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::time::Duration;
+
     use edgehog_store::conversions::SqlUuid;
     use edgehog_store::db::HandleError;
     use edgehog_store::models::job::status::JobStatus;
     use pretty_assertions::assert_eq;
+    use rstest::{fixture, rstest};
     use tempdir::TempDir;
     use uuid::Uuid;
 
@@ -201,48 +260,27 @@ pub(crate) mod tests {
         (Queue::new(db), dir)
     }
 
-    #[tokio::test]
-    async fn reset() {
-        let (queue, _dir) = queue("insert").await;
-
-        let mut exp = Job {
+    #[fixture]
+    fn simple_job() -> Job {
+        Job {
             id: SqlUuid::new(Uuid::new_v4()),
             job_type: JobType::FileTransfer,
             status: JobStatus::Pending,
             version: 0,
             tag: 0,
             data: vec![42],
-        };
-
-        queue.insert_job(exp.clone()).await.unwrap();
-
-        exp.status = JobStatus::InProgress;
-
-        let job = queue
-            .next_job(JobType::FileTransfer)
-            .await
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(job, exp);
+            schedule_at: None,
+        }
     }
 
+    #[rstest]
     #[tokio::test]
-    async fn insert_and_next() {
-        let (queue, _dir) = queue("insert_and_next").await;
+    async fn reset(mut simple_job: Job) {
+        let (queue, _dir) = queue("insert").await;
 
-        let mut exp = Job {
-            id: SqlUuid::new(Uuid::new_v4()),
-            job_type: JobType::FileTransfer,
-            status: JobStatus::Pending,
-            version: 0,
-            tag: 0,
-            data: vec![42],
-        };
+        queue.insert_job(simple_job.clone()).await.unwrap();
 
-        queue.insert_job(exp.clone()).await.unwrap();
-
-        exp.status = JobStatus::InProgress;
+        simple_job.status = JobStatus::InProgress;
 
         let job = queue
             .next_job(JobType::FileTransfer)
@@ -250,7 +288,25 @@ pub(crate) mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(job, exp);
+        assert_eq!(job, simple_job);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn insert_and_next(mut simple_job: Job) {
+        let (queue, _dir) = queue("insert_and_next").await;
+
+        queue.insert_job(simple_job.clone()).await.unwrap();
+
+        simple_job.status = JobStatus::InProgress;
+
+        let job = queue
+            .next_job(JobType::FileTransfer)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(job, simple_job);
     }
 
     #[tokio::test]
@@ -264,6 +320,7 @@ pub(crate) mod tests {
             version: 0,
             tag: 0,
             data: vec![42],
+            schedule_at: None,
         };
 
         queue.insert_job(in_progress).await.unwrap();
@@ -275,6 +332,7 @@ pub(crate) mod tests {
             version: 0,
             tag: 0,
             data: vec![42],
+            schedule_at: None,
         };
 
         queue.insert_job(exp.clone()).await.unwrap();
@@ -301,6 +359,7 @@ pub(crate) mod tests {
             version: 0,
             tag: 0,
             data: vec![42],
+            schedule_at: None,
         };
 
         queue.insert_job(exp.clone()).await.unwrap();
@@ -314,25 +373,67 @@ pub(crate) mod tests {
         assert_eq!(job, exp);
     }
 
+    #[rstest]
     #[tokio::test]
-    async fn delete_job() {
+    async fn delete_job(simple_job: Job) {
         let (queue, _dir) = queue("update_job").await;
+
+        queue.insert_job(simple_job.clone()).await.unwrap();
+
+        queue.delete(&simple_job.id, 0).await.unwrap();
+
+        let job = queue.fetch_job(&simple_job.id).await;
+
+        assert!(job.is_none());
+    }
+
+    #[tokio::test]
+    async fn fetch_next_schedule() {
+        let (queue, _dir) = queue("next_schedule").await;
+
+        let sched = SystemTime::now()
+            .checked_add(Duration::from_secs(120))
+            .unwrap()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let sched_sig = sched.try_into().unwrap();
 
         let exp = Job {
             id: SqlUuid::new(Uuid::new_v4()),
-            job_type: JobType::FileTransfer,
-            status: JobStatus::InProgress,
+            job_type: JobType::FileStorage,
+            status: JobStatus::Pending,
             version: 0,
             tag: 0,
             data: vec![42],
+            schedule_at: Some(sched_sig),
         };
 
         queue.insert_job(exp.clone()).await.unwrap();
 
-        queue.delete(&exp.id, 0).await.unwrap();
+        let instant = queue
+            .next_schedule(JobType::FileStorage)
+            .await
+            .unwrap()
+            .unwrap();
 
-        let job = queue.fetch_job(&exp.id).await;
+        assert_eq!(instant.as_u64(), sched)
+    }
 
-        assert!(job.is_none());
+    fn assert_schedule(sched: SystemTime, res: Instant) {
+        let inst_now = Instant::now();
+        let sys_now = SystemTime::now();
+
+        let next_inst = res.duration_since(inst_now);
+
+        let sched_time = sched.duration_since(sys_now).unwrap();
+
+        assert!(
+            next_inst.as_secs() >= sched_time.as_secs(),
+            "the scheduled time ({}s) should be before the next instant ({}s)",
+            sched_time.as_secs(),
+            next_inst.as_secs()
+        );
     }
 }

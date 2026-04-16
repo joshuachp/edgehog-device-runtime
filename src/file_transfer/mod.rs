@@ -52,11 +52,12 @@ use self::interface::capabilities::CAPABILITIES;
 use self::interface::status::FileTransferId;
 use self::request::download::{Destination, Download};
 use self::request::upload::{Source, Upload};
-use self::request::{Encoding, JobTag, Request};
+use self::request::{Encoding, Request, TransferJobTag};
 
 pub mod config;
 mod encoding;
 pub(crate) mod file_system;
+pub(crate) mod housekeeping;
 pub(crate) mod http;
 pub(crate) mod interface;
 pub(crate) mod request;
@@ -521,7 +522,7 @@ impl<F, S, C> FileTransfer<F, S, C> {
     {
         let FileTransferId { id, direction } = transfer;
 
-        let tag = JobTag::from(direction);
+        let tag = TransferJobTag::from(direction);
         self.queue
             .update(&id, tag.into(), JobStatus::Done)
             .await
