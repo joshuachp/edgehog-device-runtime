@@ -161,24 +161,26 @@ impl<F> FileStorage<F> {
     }
 
     #[instrument(skip_all, fields(id = %opt.id))]
-    pub(crate) async fn create_write_handle(&self, opt: &FileOptions) -> io::Result<WriteHandle>
+    pub(crate) async fn create_write_handle(&mut self, opt: &FileOptions) -> io::Result<WriteHandle>
     where
         F: Space,
     {
         let file_path = self.file_path(&opt.id);
 
-        self.fs
-            .reserve_space(opt.id, &file_path, opt.file_size)
-            .await?;
-
         trace!(path = %file_path.display(), "opening file for write");
 
-        WriteHandle::open(file_path, opt).await
+        let handle = WriteHandle::open(file_path, opt).await?;
+
+        self.fs
+            .reserve_space(opt.id, &handle.partial, opt.file_size)
+            .await?;
+
+        Ok(handle)
     }
 
     #[instrument(skip_all, fields(id = %opt.id))]
     pub(crate) async fn finalize_write(
-        &self,
+        &mut self,
         handle: &mut WriteHandle,
         opt: &FileOptions,
     ) -> io::Result<()>
@@ -187,7 +189,7 @@ impl<F> FileStorage<F> {
     {
         handle.finalize(opt).await?;
 
-        self.fs.finalize(opt.id).await?;
+        self.fs.finalize(opt.id, &handle.path).await?;
 
         Ok(())
     }
@@ -200,33 +202,68 @@ pub(crate) trait Space {
     /// It will make sure that at least the 10% of free space is available on the device the files
     /// are stored on.
     fn reserve_space(
-        &self,
+        &mut self,
         id: Uuid,
         path: &Path,
         file_size: u64,
     ) -> impl Future<Output = io::Result<()>> + Send;
 
     /// Marks the file as saved and refreshes the current quota
-    fn finalize(&self, _id: Uuid) -> impl Future<Output = io::Result<()>> + Send;
+    fn finalize(&mut self, id: Uuid, path: &Path) -> impl Future<Output = io::Result<()>> + Send;
 }
 
 #[derive(Debug)]
 pub(crate) struct Fs {
-    #[expect(unused)]
     reserved: Percentage,
 }
 
-impl Fs {}
-
+// TODO: should use tokio here
 impl Space for Fs {
-    async fn reserve_space(&self, _id: Uuid, _path: &Path, _file_size: u64) -> io::Result<()> {
-        // TODO: ensure 10% of the free space on disk
+    // TODO: we could pre-allocate the file size?
+    #[instrument(skip(self, path))]
+    async fn reserve_space(&mut self, id: Uuid, path: &Path, file_size: u64) -> io::Result<()> {
+        // See man statvfs(3) for more details on what the `StatVfs` value mean
+        let stat = rustix::fs::statvfs(path)?;
+
+        let allocation_granularity = stat.f_frsize;
+
+        // Total and available space to unprivileged user user
+        let available_space = allocation_granularity.saturating_mul(stat.f_bavail);
+        let total_space = allocation_granularity.saturating_mul(stat.f_blocks);
+
+        let file_allocation = file_size.saturating_mul(allocation_granularity);
+
+        let reserved = self.reserved.calculate(total_space);
+
+        if available_space.saturating_sub(file_allocation) < reserved {
+            return Err(io::Error::new(
+                io::ErrorKind::FileTooLarge,
+                "file size exceeds the required reserved free space",
+            ));
+        }
 
         Ok(())
     }
 
-    async fn finalize(&self, _id: Uuid) -> io::Result<()> {
-        // TODO: refresh the space
+    // TODO: we should cleanup the file
+    #[instrument(skip(self, path))]
+    async fn finalize(&mut self, id: Uuid, path: &Path) -> io::Result<()> {
+        let stat = rustix::fs::statvfs(path)?;
+
+        let allocation_granularity = stat.f_frsize;
+
+        // Total and available space to unprivileged user user
+        let available_space = allocation_granularity.saturating_mul(stat.f_bavail);
+        let total_space = allocation_granularity.saturating_mul(stat.f_blocks);
+
+        let reserved = self.reserved.calculate(total_space);
+
+        if available_space < reserved {
+            return Err(io::Error::new(
+                io::ErrorKind::FileTooLarge,
+                "file size exceeds the required reserved free space",
+            ));
+        }
 
         Ok(())
     }
@@ -318,12 +355,15 @@ mod tests {
             .in_sequence(&mut seq)
             .returning(|_, _, _| Box::pin(std::future::ready(Ok(()))));
         mock.expect_finalize()
-            .with(predicate::eq(opt.id))
+            .with(
+                predicate::eq(opt.id),
+                predicate::function(move |p: &Path| p.to_str().unwrap().contains(&id.to_string())),
+            )
             .once()
             .in_sequence(&mut seq)
-            .returning(|_| Box::pin(std::future::ready(Ok(()))));
+            .returning(|_, _| Box::pin(std::future::ready(Ok(()))));
 
-        let (store, dir) = mock_fs_storage(mock);
+        let (mut store, dir) = mock_fs_storage(mock);
 
         let mut write = store.create_write_handle(&opt).await.unwrap();
 
@@ -353,7 +393,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_handle_new() {
-        let (store, dir) = fs_storage();
+        let (mut store, dir) = fs_storage();
 
         let id = Uuid::new_v4();
 
@@ -398,7 +438,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_handle_existing() {
-        let (store, dir) = fs_storage();
+        let (mut store, dir) = fs_storage();
 
         let id = Uuid::new_v4();
 
