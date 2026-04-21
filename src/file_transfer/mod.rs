@@ -205,7 +205,7 @@ impl<F, S, C> FileTransfer<F, S, C> {
         S: Pipe,
         C: Client + Send + Sync + 'static,
     {
-        self.storage.init().await?;
+        self.storage.init(&self.queue).await?;
 
         self.jobs(&cancel).await?;
 
