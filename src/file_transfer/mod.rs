@@ -260,13 +260,15 @@ impl<F, S, C> FileTransfer<F, S, C> {
     {
         let id = job.transfer();
 
+        info!("starting file transfer");
+
         let result = match job {
             Request::Download(download) => self.download(&download).await,
             Request::Upload(upload) => self.upload(&upload).await,
         };
 
         match result {
-            Ok(_) => self.job_done(id).await,
+            Ok(()) => self.job_done(id).await,
             Err(error) => {
                 error!(
                     error = format!("{error:#}"),
@@ -584,6 +586,7 @@ impl<F, S, C> FileTransfer<F, S, C> {
         Ok(())
     }
 
+    #[instrument(skip(self))]
     async fn job_done(&mut self, transfer: FileTransferId) -> eyre::Result<()>
     where
         C: Client + Send + Sync + 'static,
@@ -595,6 +598,8 @@ impl<F, S, C> FileTransfer<F, S, C> {
             .update(&id, JobType::FileTransfer, tag.into(), JobStatus::Done)
             .await
             .wrap_err("couldn't update job status")?;
+
+        info!("job success");
 
         FileTransferResponse::success(transfer)
             .send(&mut self.device)
@@ -620,6 +625,8 @@ impl<F, S, C> FileTransfer<F, S, C> {
             .update(&id, JobType::FileTransfer, tag.into(), JobStatus::Error)
             .await
             .wrap_err("couldn't update job status")?;
+
+        error!("job error");
 
         FileTransferResponse::runtime_error(id, direction, error)
             .send(&mut self.device)
