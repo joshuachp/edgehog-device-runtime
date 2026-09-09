@@ -30,10 +30,12 @@ use edgehog_store::models::containers::container::{
 use edgehog_store::models::containers::deployment::{
     Deployment, DeploymentContainer, DeploymentMissingContainer, DeploymentStatus,
 };
+use edgehog_store::models::containers::file_bind::{ContainerEnvFile, ContainerFileBind};
 use edgehog_store::schema::containers::{
-    container_device_mappings, container_device_requests, container_missing_images,
-    container_missing_networks, container_missing_volumes, container_networks, container_volumes,
-    containers, deployment_containers, deployment_missing_containers, deployments,
+    container_device_mappings, container_device_requests, container_env_files,
+    container_file_binds, container_missing_images, container_missing_networks,
+    container_missing_volumes, container_networks, container_volumes, containers,
+    deployment_containers, deployment_missing_containers, deployments,
 };
 use itertools::Itertools;
 use tracing::{debug, instrument};
@@ -244,6 +246,8 @@ impl StateStore {
                         Option::<ContainerVolume>::as_select(),
                         Option::<ContainerDeviceMapping>::as_select(),
                         Option::<ContainerDeviceRequest>::as_select(),
+                        Option::<ContainerFileBind>::as_select(),
+                        Option::<ContainerEnvFile>::as_select(),
                     ))
                     .load::<DeploymentRow>(reader)?;
 
@@ -352,6 +356,32 @@ impl StateStore {
                     .filter_map(|container_device_request| container_device_request.map(Uuid::from))
                     .collect();
 
+                let file_binds = Deployment::join_resources()
+                    .filter(deployment_containers::deployment_id.eq(id))
+                    .select(container_file_binds::file_bind_id.nullable())
+                    .except(
+                        Deployment::join_resources()
+                            .filter(deployment_containers::deployment_id.ne(id))
+                            .select(container_file_binds::file_bind_id.nullable()),
+                    )
+                    .load::<Option<SqlUuid>>(reader)?
+                    .into_iter()
+                    .filter_map(|container_device_request| container_device_request.map(Uuid::from))
+                    .collect();
+
+                let env_files = Deployment::join_resources()
+                    .filter(deployment_containers::deployment_id.eq(id))
+                    .select(container_env_files::env_file_id.nullable())
+                    .except(
+                        Deployment::join_resources()
+                            .filter(deployment_containers::deployment_id.ne(id))
+                            .select(container_env_files::env_file_id.nullable()),
+                    )
+                    .load::<Option<SqlUuid>>(reader)?
+                    .into_iter()
+                    .filter_map(|container_device_request| container_device_request.map(Uuid::from))
+                    .collect();
+
                 Ok(Some(DeploymentResource {
                     containers,
                     images,
@@ -359,6 +389,8 @@ impl StateStore {
                     networks,
                     device_mappings,
                     device_requests,
+                    file_binds,
+                    env_files,
                 }))
             })
             .await?;
@@ -449,6 +481,8 @@ mod tests {
     use crate::requests::container::tests::create_container_req;
     use crate::requests::device_mapping::tests::create_device_mapping_req;
     use crate::requests::device_request::tests::create_device_request;
+    use crate::requests::env_file::tests::create_env_file_req;
+    use crate::requests::file_bind::tests::create_file_bind_req;
     use crate::requests::image::tests::create_image_req;
     use crate::requests::network::tests::create_network_req;
     use crate::requests::volume::tests::create_volume_req;
@@ -484,6 +518,8 @@ mod tests {
         let network = create_network_req(deployment_id);
         let device_mapping = create_device_mapping_req(deployment_id);
         let device_request = create_device_request(deployment_id);
+        let file_bind = create_file_bind_req(deployment_id);
+        let env_file = create_env_file_req(deployment_id);
         let container = create_container_req(
             deployment_id,
             &image,
@@ -491,6 +527,8 @@ mod tests {
             &network,
             &device_mapping,
             &device_request,
+            &file_bind,
+            &env_file,
         );
 
         store.create_image(image).await.unwrap();
@@ -572,6 +610,8 @@ mod tests {
         let network = create_network_req(deployment_id);
         let device_mapping = create_device_mapping_req(deployment_id);
         let device_request = create_device_request(deployment_id);
+        let file_bind = create_file_bind_req(deployment_id);
+        let env_file = create_env_file_req(deployment_id);
         let container = create_container_req(
             deployment_id,
             &image,
@@ -579,6 +619,8 @@ mod tests {
             &network,
             &device_mapping,
             &device_request,
+            &file_bind,
+            &env_file,
         );
 
         store.create_image(image.clone()).await.unwrap();
@@ -616,6 +658,8 @@ mod tests {
             networks: HashSet::from_iter([network.id.0]),
             device_mappings: HashSet::from_iter([device_mapping.id.0]),
             device_requests: HashSet::from_iter([device_request.id.0]),
+            file_binds: HashSet::from_iter([file_bind.id.0]),
+            env_files: HashSet::from_iter([env_file.id.0]),
         };
 
         assert_eq!(deployment, exp);
@@ -637,6 +681,8 @@ mod tests {
         let network = create_network_req(deployment_id_1);
         let device_mapping = create_device_mapping_req(deployment_id_1);
         let device_request = create_device_request(deployment_id_1);
+        let file_bind = create_file_bind_req(deployment_id_1);
+        let env_file = create_env_file_req(deployment_id_1);
         let container_1 = create_container_req(
             deployment_id_1,
             &image,
@@ -644,6 +690,8 @@ mod tests {
             &network,
             &device_mapping,
             &device_request,
+            &file_bind,
+            &env_file,
         );
 
         store.create_image(image.clone()).await.unwrap();
@@ -676,6 +724,8 @@ mod tests {
             &network,
             &device_mapping,
             &device_request,
+            &file_bind,
+            &env_file,
         );
         store
             .create_container(Box::new(container_2.clone()))
@@ -701,6 +751,8 @@ mod tests {
             networks: HashSet::new(),
             device_mappings: HashSet::new(),
             device_requests: HashSet::new(),
+            file_binds: HashSet::new(),
+            env_files: HashSet::new(),
         };
 
         assert_eq!(res, exp);
@@ -722,6 +774,8 @@ mod tests {
         let network = create_network_req(deployment_id);
         let device_mapping = create_device_mapping_req(deployment_id);
         let device_request = create_device_request(deployment_id);
+        let file_bind = create_file_bind_req(deployment_id);
+        let env_file = create_env_file_req(deployment_id);
         let container_1 = create_container_req(
             deployment_id,
             &image,
@@ -729,6 +783,8 @@ mod tests {
             &network,
             &device_mapping,
             &device_request,
+            &file_bind,
+            &env_file,
         );
         let container_2 = create_container_req(
             deployment_id,
@@ -737,6 +793,8 @@ mod tests {
             &network,
             &device_mapping,
             &device_request,
+            &file_bind,
+            &env_file,
         );
 
         store.create_image(image.clone()).await.unwrap();
@@ -778,6 +836,8 @@ mod tests {
             networks: HashSet::from_iter([network.id.0]),
             device_mappings: HashSet::from_iter([device_mapping.id.0]),
             device_requests: HashSet::from_iter([device_request.id.0]),
+            file_binds: HashSet::from_iter([file_bind.id.0]),
+            env_files: HashSet::from_iter([env_file.id.0]),
         };
 
         assert_eq!(res, exp);

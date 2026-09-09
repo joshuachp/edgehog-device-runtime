@@ -20,8 +20,10 @@
 
 use std::fmt::{Debug, Display};
 
-use astarte_device_sdk::{astarte_device_error::Error, event::FromEventError};
-use edgehog_store::{conversions::SqlUuid, models::containers::deployment::DeploymentStatus};
+use astarte_device_sdk::event::FromEventError;
+use astarte_device_sdk::{astarte_device_error::Error, properties::PropAccess};
+use edgehog_store::conversions::SqlUuid;
+use edgehog_store::models::containers::deployment::DeploymentStatus;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
@@ -38,7 +40,8 @@ use crate::{
     resource::{
         Context, Create, Resource, ResourceError, State, container::ContainerResource,
         deployment::Deployment, device_mapping::DeviceMappingResource,
-        device_request::DeviceRequestResource, image::ImageResource, network::NetworkResource,
+        device_request::DeviceRequestResource, env_file::EnvFileResource,
+        file_bind::FileBindResource, image::ImageResource, network::NetworkResource,
         volume::VolumeResource,
     },
     store::{StateStore, StoreError},
@@ -121,7 +124,7 @@ impl<D> Service<D> {
     #[instrument(skip_all)]
     pub async fn init(&mut self) -> Result<()>
     where
-        D: Client + Send + Sync + 'static,
+        D: Client + PropAccess + Send + Sync + 'static,
     {
         self.publish_received().await?;
 
@@ -139,7 +142,7 @@ impl<D> Service<D> {
     #[instrument(skip_all)]
     async fn publish_received(&mut self) -> Result<()>
     where
-        D: Client + Send + Sync + 'static,
+        D: Client + PropAccess + Send + Sync + 'static,
     {
         for id in self.store.load_images_to_publish().await? {
             let mut context = self.context(id);
@@ -169,6 +172,18 @@ impl<D> Service<D> {
             let mut context = self.context(id);
 
             DeviceRequestResource::publish(&mut context).await?;
+        }
+
+        for id in self.store.load_file_binds_to_publish().await? {
+            let mut context = self.context(id);
+
+            FileBindResource::publish(&mut context).await?;
+        }
+
+        for id in self.store.load_env_files_to_publish().await? {
+            let mut context = self.context(id);
+
+            EnvFileResource::publish(&mut context).await?;
         }
 
         for id in self.store.load_containers_to_publish().await? {
@@ -240,7 +255,7 @@ impl<D> Service<D> {
     #[instrument(skip_all)]
     pub async fn handle_events(&mut self)
     where
-        D: Client + Send + Sync + 'static,
+        D: Client + PropAccess + Send + Sync + 'static,
     {
         while let Some(event) = self.events.recv().await {
             self.on_event(event).await;
@@ -252,7 +267,7 @@ impl<D> Service<D> {
     #[instrument(skip_all)]
     async fn on_event(&mut self, event: ContainerEvent)
     where
-        D: Client + Send + Sync + 'static,
+        D: Client + PropAccess + Send + Sync + 'static,
     {
         match event {
             ContainerEvent::Resource {
@@ -291,7 +306,7 @@ impl<D> Service<D> {
     #[instrument(skip_all, fields(%id))]
     async fn resource_req(&mut self, id: Id, deployment_id: Uuid)
     where
-        D: Client + Send + Sync + 'static,
+        D: Client + PropAccess + Send + Sync + 'static,
     {
         let res = match id.resource_type() {
             ResourceType::Image => ImageResource::publish(&mut self.context(*id.uuid())).await,
@@ -303,6 +318,10 @@ impl<D> Service<D> {
             ResourceType::DeviceRequest => {
                 DeviceRequestResource::publish(&mut self.context(*id.uuid())).await
             }
+            ResourceType::FileBind => {
+                FileBindResource::publish(&mut self.context(*id.uuid())).await
+            }
+            ResourceType::EnvFile => EnvFileResource::publish(&mut self.context(*id.uuid())).await,
             ResourceType::Container => {
                 ContainerResource::publish(&mut self.context(*id.uuid())).await
             }
@@ -387,7 +406,7 @@ impl<D> Service<D> {
 
     async fn start_deployment(&mut self, deployment_id: Uuid, deployment: Deployment) -> Result<()>
     where
-        D: Client + Send + Sync + 'static,
+        D: Client + PropAccess + Send + Sync + 'static,
     {
         crate::tracing::notify(crate::tracing::SecurityEvent::ContainerStartInit);
 
@@ -401,6 +420,14 @@ impl<D> Service<D> {
 
         for id in deployment.networks {
             NetworkResource::up(self.context(id)).await?;
+        }
+
+        for id in deployment.file_binds {
+            FileBindResource::check(&mut self.context(id)).await?;
+        }
+
+        for id in deployment.file_binds {
+            EnvFileResource::check(&mut self.context(id)).await?;
         }
 
         for id in deployment.containers.values().copied() {
@@ -613,6 +640,14 @@ impl<D> Service<D> {
             self.store.delete_device_request(id).await?;
         }
 
+        for id in deployment.file_binds {
+            self.store.delete_file_bind(id).await?;
+        }
+
+        for id in deployment.env_files {
+            self.store.delete_env_file(id).await?;
+        }
+
         AvailableDeployment::new(&deployment_id)
             .unset(&mut self.device)
             .await
@@ -764,7 +799,9 @@ impl<D> Service<D> {
             ResourceType::Container => ContainerResource::refresh(&mut ctx).await,
             ResourceType::Deployment
             | ResourceType::DeviceMapping
-            | ResourceType::DeviceRequest => {
+            | ResourceType::DeviceRequest
+            | ResourceType::FileBind
+            | ResourceType::EnvFile => {
                 debug!("nothing to refresh");
 
                 return;
@@ -861,6 +898,10 @@ pub enum ResourceType {
     DeviceMapping,
     /// Device request resource.
     DeviceRequest,
+    /// File bind resource.
+    FileBind,
+    /// Env file resource.
+    EnvFile,
     /// Container resource.
     Container,
     /// Deployment resource.
@@ -877,6 +918,8 @@ impl Display for ResourceType {
             ResourceType::DeviceRequest => write!(f, "DeviceRequest"),
             ResourceType::Container => write!(f, "Container"),
             ResourceType::Deployment => write!(f, "Deployment"),
+            ResourceType::FileBind => write!(f, "FileBind"),
+            ResourceType::EnvFile => write!(f, "EnvFile"),
         }
     }
 }
@@ -908,6 +951,8 @@ mod tests {
     use crate::requests::container::tests::{create_container_req, create_container_request_event};
     use crate::requests::deployment::tests::create_deployment_request_event;
     use crate::requests::device_mapping::tests::create_device_mapping_req;
+    use crate::requests::env_file::tests::create_env_file_req;
+    use crate::requests::file_bind::tests::create_file_bind_req;
     use crate::requests::image::tests::create_image_req;
     use crate::requests::image::tests::create_image_request_event;
     use crate::requests::network::tests::create_network_req;
@@ -1272,6 +1317,8 @@ mod tests {
         let volume = create_volume_req(deployment_id);
         let device_mapping = create_device_mapping_req(deployment_id);
         let device_request = create_device_request(deployment_id);
+        let file_bind = create_file_bind_req(deployment_id);
+        let env_file = create_env_file_req(deployment_id);
         let container = create_container_req(
             deployment_id,
             &image,
@@ -1279,6 +1326,8 @@ mod tests {
             &network,
             &device_mapping,
             &device_request,
+            &file_bind,
+            &env_file,
         );
 
         let mut client = Docker::connect().await.unwrap();
@@ -1379,6 +1428,8 @@ mod tests {
         let volume = create_volume_req(deployment_id);
         let device_mapping = create_device_mapping_req(deployment_id);
         let device_request = create_device_request(deployment_id);
+        let file_bind = create_file_bind_req(deployment_id);
+        let env_file = create_env_file_req(deployment_id);
         let container = create_container_req(
             deployment_id,
             &image,
@@ -1386,6 +1437,8 @@ mod tests {
             &network,
             &device_mapping,
             &device_request,
+            &file_bind,
+            &env_file,
         );
 
         let mut client = Docker::connect().await.unwrap();
@@ -1759,6 +1812,8 @@ mod tests {
         let volume = create_volume_req(deployment_id);
         let device_mapping = create_device_mapping_req(deployment_id);
         let device_request = create_device_request(deployment_id);
+        let file_bind = create_file_bind_req(deployment_id);
+        let env_file = create_env_file_req(deployment_id);
         let container = create_container_req(
             deployment_id,
             &image,
@@ -1766,6 +1821,8 @@ mod tests {
             &network,
             &device_mapping,
             &device_request,
+            &file_bind,
+            &env_file,
         );
 
         let mut client = Docker::connect().await.unwrap();

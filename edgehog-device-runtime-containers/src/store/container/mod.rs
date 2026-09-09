@@ -501,6 +501,8 @@ pub(crate) mod tests {
     use crate::requests::container::tests::create_container_req;
     use crate::requests::device_mapping::tests::create_device_mapping_req;
     use crate::requests::device_request::tests::create_device_request;
+    use crate::requests::env_file::tests::create_env_file_req;
+    use crate::requests::file_bind::tests::create_file_bind_req;
     use crate::requests::image::tests::create_image_req;
     use crate::requests::network::tests::create_network_req;
     use crate::requests::volume::tests::create_volume_req;
@@ -538,6 +540,8 @@ pub(crate) mod tests {
         let network = create_network_req(deployment_id);
         let device_mapping = create_device_mapping_req(deployment_id);
         let device_request = create_device_request(deployment_id);
+        let file_bind = create_file_bind_req(deployment_id);
+        let env_file = create_env_file_req(deployment_id);
         let container = create_container_req(
             deployment_id,
             &image,
@@ -545,6 +549,8 @@ pub(crate) mod tests {
             &network,
             &device_mapping,
             &device_request,
+            &file_bind,
+            &env_file,
         );
 
         let mut exp = stored_container_full(container.id.0, &image);
@@ -583,6 +589,8 @@ pub(crate) mod tests {
         let network = create_network_req(deployment_id);
         let device_mapping = create_device_mapping_req(deployment_id);
         let device_request = create_device_request(deployment_id);
+        let file_bind = create_file_bind_req(deployment_id);
+        let env_file = create_env_file_req(deployment_id);
         let container = create_container_req(
             deployment_id,
             &image,
@@ -590,6 +598,8 @@ pub(crate) mod tests {
             &network,
             &device_mapping,
             &device_request,
+            &file_bind,
+            &env_file,
         );
 
         let exp = stored_container_full(container.id.0, &image);
@@ -627,6 +637,8 @@ pub(crate) mod tests {
         let network = create_network_req(deployment_id);
         let device_mapping = create_device_mapping_req(deployment_id);
         let device_request = create_device_request(deployment_id);
+        let file_bind = create_file_bind_req(deployment_id);
+        let env_file = create_env_file_req(deployment_id);
         let container = create_container_req(
             deployment_id,
             &image,
@@ -634,6 +646,8 @@ pub(crate) mod tests {
             &network,
             &device_mapping,
             &device_request,
+            &file_bind,
+            &env_file,
         );
 
         let exp = stored_container_full(container.id.0, &image);

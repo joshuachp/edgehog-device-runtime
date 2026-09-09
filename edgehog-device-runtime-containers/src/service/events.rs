@@ -112,6 +112,12 @@ impl<D> ServiceHandle<D> {
                     .create_device_request(create_device_request)
                     .await
             }
+            ContainerRequest::FileBind(create_file_bind) => {
+                self.store.create_file_bind(create_file_bind).await
+            }
+            ContainerRequest::EnvFile(create_env_file) => {
+                self.store.create_env_file(create_env_file).await
+            }
             ContainerRequest::Container(create_container) => {
                 self.store.create_container(create_container).await
             }
@@ -201,6 +207,22 @@ impl From<&ContainerRequest> for ContainerEvent {
                 ContainerEvent::Resource {
                     resource,
                     deployment: create_device_request.deployment_id.0,
+                }
+            }
+            ContainerRequest::FileBind(create_file_bind) => {
+                let resource = Id::new(ResourceType::DeviceRequest, create_file_bind.id.0);
+
+                ContainerEvent::Resource {
+                    resource,
+                    deployment: create_file_bind.deployment_id.0,
+                }
+            }
+            ContainerRequest::EnvFile(create_env_file) => {
+                let resource = Id::new(ResourceType::DeviceRequest, create_env_file.id.0);
+
+                ContainerEvent::Resource {
+                    resource,
+                    deployment: create_env_file.deployment_id.0,
                 }
             }
             ContainerRequest::Container(create_container) => {
