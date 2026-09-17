@@ -362,6 +362,8 @@ pub(crate) struct HttpRequest {
     pub(crate) body: Vec<u8>,
     /// Port on the device to which the request will be sent.
     pub(crate) port: u16,
+    /// Disable TLS certificate validation.
+    pub(crate) insecure: bool,
 }
 
 impl HttpRequest {
@@ -377,6 +379,7 @@ impl HttpRequest {
             body,
             port,
             host,
+            insecure,
         } = req;
 
         Ok(Self {
@@ -387,6 +390,7 @@ impl HttpRequest {
             headers: (&headers).try_into()?,
             body,
             port: port.try_into()?,
+            insecure,
             host,
         })
     }
@@ -402,6 +406,7 @@ impl HttpRequest {
             headers,
             body,
             port,
+            insecure,
         } = self;
 
         let origin = {
@@ -415,23 +420,19 @@ impl HttpRequest {
         url.set_path(&path);
         url.set_query((!query_string.is_empty()).then_some(&query_string));
 
-        let tls = astarte_device_tls::config().map_err(|error| {
+        let tls = if insecure {
+            astarte_device_tls::insecure::insecure()
+        } else {
+            astarte_device_tls::config()
+        }
+        .map_err(|error| {
             error!(%error, "couldn't configure TLS");
 
             ProtocolError::ReqBuild(", configure TLS")
         })?;
 
-        let mut http_builder = reqwest::Client::builder().use_preconfigured_tls(tls);
-
-        // Resolve the host to localhost, this prevents making requests to other hosts.
-        if let Some(host) = host.as_ref() {
-            http_builder = http_builder.resolve(
-                host,
-                SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)),
-            );
-        }
-
-        let http_builder = http_builder
+        let http_builder = reqwest::Client::builder()
+            .use_preconfigured_tls(tls)
             .build()?
             .request(method, url)
             .headers(headers)
@@ -499,6 +500,7 @@ impl From<HttpRequest> for ProtobufHttpRequest {
             body: http_req.body,
             port: http_req.port.into(),
             host: http_req.host,
+            insecure: http_req.insecure,
         }
     }
 }
@@ -723,6 +725,7 @@ mod tests {
             body: Vec::new(),
             port: 0,
             host: None,
+            insecure: false,
         })
     }
 
@@ -744,6 +747,7 @@ mod tests {
                 method: "GET".to_string(),
                 port: 0,
                 host: None,
+                insecure: false,
             })),
         }
     }
@@ -767,6 +771,7 @@ mod tests {
             body,
             port: 0,
             host: None,
+            insecure: false,
         }
     }
 

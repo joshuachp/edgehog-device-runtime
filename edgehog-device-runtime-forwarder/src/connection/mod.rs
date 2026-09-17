@@ -223,6 +223,7 @@ mod tests {
             body: Vec::new(),
             port: url.port().expect("nonexistent port"),
             host: None,
+            insecure: false,
         }
     }
 
