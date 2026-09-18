@@ -376,7 +376,7 @@ impl<C> Runtime<C> {
             }
         };
 
-        let service = edgehog_service::service::EdgehogService::new(options);
+        let service = edgehog_service::service::EdgehogService::new(todo!(), options);
 
         #[cfg(feature = "containers")]
         let service = {

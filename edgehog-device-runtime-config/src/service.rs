@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use crate::Mergiable;
 
 /// Configuration for the Edgehog Local Service.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ServiceConfig {
     /// Flag to enable the service
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -46,7 +46,7 @@ impl Mergiable for ServiceConfig {
 }
 
 /// Listener for the service
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Listener {
     /// Unix domain socket

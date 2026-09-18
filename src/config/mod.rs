@@ -16,12 +16,9 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io;
-use std::path::Path;
-
+use edgehog_config::ConfigFile;
 use edgehog_config::sdk::AstarteLibrary;
-use edgehog_config::{ConfigFile, Mergiable};
-use eyre::{Context, ensure};
+use eyre::Context;
 use tracing::{debug, info, trace};
 
 use crate::DeviceManagerOptions;
@@ -29,23 +26,24 @@ use crate::cli::Cli;
 use crate::repository::StateRepository;
 use crate::repository::file_state_repository::FileStateRepository;
 
-const PATHS: [&str; 2] = ["edgehog-config.toml", "/etc/edgehog/config.toml"];
+use self::loader::{ConfigRepository, CustomConfig};
+
+pub mod loader;
 
 /// Read configuration options
 pub async fn read_options(cli: Cli) -> eyre::Result<DeviceManagerOptions> {
-    if let Some(path) = &cli.config {
-        ensure!(
-            path.exists(),
-            "configuration file {} doesn't exists",
-            path.display()
-        );
-    }
+    let custom = cli
+        .config
+        .clone()
+        .map(CustomConfig::File)
+        .or(cli.configuration_file.clone().map(CustomConfig::Dir));
 
-    let override_config_file_path = cli.config.as_deref().or(cli.configuration_file.as_deref());
+    let overrides = ConfigFile::from(cli);
 
-    let mut config = read_config_file(override_config_file_path).await?;
+    let mut loader = ConfigRepository::with_overrides(overrides);
+    loader.read_configs(&custom).await?;
 
-    config.merge(ConfigFile::from(cli));
+    let mut config = loader.merge_configs();
 
     match config.astarte_library {
         Some(AstarteLibrary::AstarteDeviceSdk) | None => {
@@ -66,49 +64,6 @@ pub async fn read_options(cli: Cli) -> eyre::Result<DeviceManagerOptions> {
     }
 
     config.try_into()
-}
-
-async fn read_config_file(
-    override_config_file_path: Option<&Path>,
-) -> Result<ConfigFile, eyre::Error> {
-    match override_config_file_path {
-        Some(custom_config) => {
-            debug!(config = %custom_config.display(), "reading custom configuration file");
-
-            let custom_config = tokio::fs::read_to_string(custom_config)
-                .await
-                .wrap_err("coudln't read custom configuration file")?;
-            let config: ConfigFile = toml::from_str(&custom_config)
-                .wrap_err("couldn't parse custom configuration file")?;
-
-            Ok(config)
-        }
-        None => {
-            for path in PATHS {
-                match tokio::fs::read_to_string(path).await {
-                    Ok(content) => {
-                        let config_file: ConfigFile = toml::from_str(&content)
-                            .wrap_err_with(|| format!("couldn't parse config file {path}"))?;
-
-                        info!(path, "configuration file");
-
-                        return Ok(config_file);
-                    }
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                        trace!(path, "file not found");
-                    }
-                    Err(error) => {
-                        return Err(error)
-                            .wrap_err_with(|| format!("couldn't read config file {path}"));
-                    }
-                }
-            }
-
-            debug!("no configuration file found");
-
-            Ok(ConfigFile::default())
-        }
-    }
 }
 
 /// Reads the credentials secret

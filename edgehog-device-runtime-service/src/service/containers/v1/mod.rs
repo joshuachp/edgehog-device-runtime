@@ -28,8 +28,8 @@ use edgehog_proto::containers::v1::{
     ListInfoIds, ListInfoSummary, ListRequest, ListResponse, StartRequest, StatsRequest,
     StatsResponse, StopRequest,
 };
-use edgehog_proto::tonic::{self, Response, Status};
 use tokio_stream::wrappers::ReceiverStream;
+use tonic::{self, Response, Status};
 use tracing::error;
 use uuid::Uuid;
 
@@ -275,6 +275,7 @@ mod tests {
     use edgehog_containers::local::MockContainerHandle;
     use mockall::{Sequence, predicate};
     use pretty_assertions::assert_eq;
+    use tempfile::TempDir;
 
     use crate::service::tests::mock_service;
 
@@ -282,6 +283,7 @@ mod tests {
 
     #[tokio::test]
     async fn should_list_containers_empty() {
+        let tmpdir = TempDir::new().unwrap();
         let mut handle = MockContainerHandle::default();
         let mut seq = Sequence::new();
 
@@ -292,7 +294,7 @@ mod tests {
             .with(predicate::eq(Vec::new()))
             .returning(|_| Ok(HashMap::new()));
 
-        let service = mock_service(handle);
+        let service = mock_service(tmpdir.path().to_path_buf(), handle);
 
         let req = ListRequest {
             list_info: None,
