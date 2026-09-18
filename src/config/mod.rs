@@ -26,6 +26,8 @@ use tracing::{info, warn};
 
 use crate::cli::{Cli, Command, DeviceSdkArgs, OverrideOption};
 
+pub(crate) mod loader;
+
 /// Configuration file
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct Config {
