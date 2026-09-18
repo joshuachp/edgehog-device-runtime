@@ -19,7 +19,10 @@
 //! Structure to manage the service.
 
 use std::fmt::Display;
+#[cfg(unix)]
+use std::io;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use cfg_if::cfg_if;
@@ -31,6 +34,7 @@ use tracing::info;
 
 use crate::config::Config;
 
+mod config;
 #[cfg(feature = "containers")]
 mod containers;
 
@@ -98,14 +102,16 @@ impl Display for Listener {
 #[derive(Debug)]
 pub struct EdgehogService {
     options: ServiceOptions,
+    config_dir: PathBuf,
     #[cfg(feature = "containers")]
     containers: Option<self::containers::SharedContainerHandle>,
 }
 
 impl EdgehogService {
     /// Create a new instance of the service
-    pub fn new(options: ServiceOptions) -> Self {
+    pub fn new(config_dir: PathBuf, options: ServiceOptions) -> Self {
         Self {
+            config_dir,
             options,
             #[cfg(feature = "containers")]
             containers: None,
@@ -159,16 +165,16 @@ impl Drop for EdgehogService {
     fn drop(&mut self) {
         match &self.options.listener {
             #[cfg(unix)]
-            Listener::Unix(path_buf) => {
-                if path_buf.exists()
-                    && let Err(err) = std::fs::remove_file(path_buf)
-                {
+            Listener::Unix(path_buf) => match std::fs::remove_file(path_buf) {
+                Ok(()) => {}
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                Err(err) => {
                     tracing::error!(
                         error = format!("{:#}", eyre::Report::new(err)),
                         "couldn't remove unix socket"
                     );
                 }
-            }
+            },
             Listener::Socket(_) => {}
         }
     }

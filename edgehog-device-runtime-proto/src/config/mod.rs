@@ -1,6 +1,6 @@
 // This file is part of Edgehog.
 //
-// Copyright 2025, 2026 SECO Mind Srl
+// Copyright 2026 SECO Mind Srl
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-pub mod config;
-pub mod containers;
+pub mod v1;
 
-// Re-exported dependencies
-pub use prost;
-pub use prost_types;
-pub use tonic;
+// Re-export latest version
+pub use v1 as latest;

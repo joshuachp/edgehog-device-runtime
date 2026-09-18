@@ -35,6 +35,7 @@ cfg-if.workspace = true
 edgehog-containers = { workspace = true, optional = true }
 edgehog-proto.workspace = true
 eyre.workspace = true
+tonic.workspace = true
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["net", "fs"] }
 tokio-stream = { workspace = true, features = ["net"] }
