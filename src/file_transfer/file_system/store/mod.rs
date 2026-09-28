@@ -34,6 +34,7 @@ use uuid::Uuid;
 
 use crate::file_transfer::config::Percentage;
 use crate::file_transfer::encoding::Paths;
+use crate::file_transfer::file_system::WriteTarget;
 use crate::file_transfer::interface::file::StoredFile;
 use crate::file_transfer::request::{FileDigest, TransferJobTag};
 use crate::jobs::Queue;
@@ -178,12 +179,12 @@ impl<F> FileStorage<F> {
         self.dir.join(partial_file_name)
     }
 
-    pub(crate) fn file_path(&self, id: &Uuid, name: Option<&Path>) -> PathBuf {
-        if let Some(name) = name {
-            self.dir_path(id).join(name)
-        } else {
+    pub(crate) fn target_path(&self, id: &Uuid, target: WriteTarget<'_>) -> PathBuf {
+        match target {
+            WriteTarget::File(name) => self.dir_path(id).join(name),
             // when the name is empty use the default migration file name
-            self.dir_path(id).join(WriteHandle::DEFAULT_FILE_NAME)
+            WriteTarget::FileUnnamed => self.dir_path(id).join(WriteHandle::DEFAULT_FILE_NAME),
+            WriteTarget::Dir => self.dir_path(id),
         }
     }
 
@@ -191,11 +192,11 @@ impl<F> FileStorage<F> {
     pub(crate) async fn file_exists(
         &self,
         id: &Uuid,
-        file_name: Option<&Path>,
+        target: WriteTarget<'_>,
         alg: FileDigest,
         digest: &[u8],
     ) -> eyre::Result<bool> {
-        let path = self.file_path(id, file_name);
+        let path = self.target_path(id, target);
 
         WriteHandle::try_exists(&path, alg, digest)
             .await
@@ -236,16 +237,16 @@ impl<F> FileStorage<F> {
         Ok(file)
     }
 
-    #[instrument(skip_all, fields(id = %opt.id, ?name))]
+    #[instrument(skip_all, fields(id = %opt.id, ?target))]
     pub(crate) async fn create_write_handle(
         &mut self,
-        name: Option<&Path>,
+        target: WriteTarget<'_>,
         opt: &FileOptions,
     ) -> io::Result<WriteHandle>
     where
         F: Space,
     {
-        let file = self.file_path(&opt.id, name);
+        let file = self.target_path(&opt.id, target);
         let partial = self.partial_path(&opt.id);
         let handle = WriteHandle::open(file, partial, opt).await?;
 
@@ -497,7 +498,10 @@ pub(crate) mod tests {
         let dir_path = dir.path().join(id.to_string());
         let file_path = dir.path().join(id.to_string()).join(file_name);
 
-        assert_eq!(store.file_path(&id, Some(file_name)), file_path);
+        assert_eq!(
+            store.target_path(&id, WriteTarget::File(file_name)),
+            file_path
+        );
 
         tokio::fs::create_dir_all(dir_path).await.unwrap();
         tokio::fs::write(&file_path, "test").await.unwrap();
@@ -549,7 +553,7 @@ pub(crate) mod tests {
         let (mut store, _dir) = mock_fs_storage(mock);
 
         let mut write = store
-            .create_write_handle(Some(Path::new("testfile.txt")), &opt)
+            .create_write_handle(WriteTarget::File(Path::new("testfile.txt")), &opt)
             .await
             .unwrap();
 
@@ -597,7 +601,7 @@ pub(crate) mod tests {
             compression: None,
         };
         let mut write = store
-            .create_write_handle(Some(Path::new("testfile.txt")), &opt)
+            .create_write_handle(WriteTarget::File(Path::new("testfile.txt")), &opt)
             .await
             .unwrap();
 
@@ -647,7 +651,7 @@ pub(crate) mod tests {
 
         {
             let mut write = store
-                .create_write_handle(Some(Path::new("testfile.txt")), &opt)
+                .create_write_handle(WriteTarget::File(Path::new("testfile.txt")), &opt)
                 .await
                 .unwrap();
 
@@ -657,7 +661,7 @@ pub(crate) mod tests {
 
         // Write rest
         let mut write = store
-            .create_write_handle(Some(Path::new("testfile.txt")), &opt)
+            .create_write_handle(WriteTarget::File(Path::new("testfile.txt")), &opt)
             .await
             .unwrap();
 

@@ -44,6 +44,7 @@ use uuid::Uuid;
 use crate::controller::actor::Persisted;
 use crate::file_transfer::encoding::tar_gz::TarGzEncoding;
 use crate::file_transfer::encoding::{EncoderBuilder, TarEncoding};
+use crate::file_transfer::file_system::WriteTarget;
 use crate::file_transfer::http::FtHttpClient;
 use crate::file_transfer::interface::file::StoredFile;
 use crate::file_transfer::interface::request::FileTransferRequest;
@@ -323,14 +324,11 @@ impl<F, S, C> FileTransfer<F, S, C> {
         C: Client + Send + Sync + 'static,
         F: Space,
     {
+        let target = WriteTarget::create(file_name.as_deref(), download.encoding);
+
         let exists = self
             .storage
-            .file_exists(
-                &download.id,
-                file_name.as_deref(),
-                download.digest_type,
-                &download.digest,
-            )
+            .file_exists(&download.id, target, download.digest_type, &download.digest)
             .await?;
 
         if exists {
@@ -345,10 +343,7 @@ impl<F, S, C> FileTransfer<F, S, C> {
 
         let opt = FileOptions::from(download);
 
-        let mut file = self
-            .storage
-            .create_write_handle(file_name.as_deref(), &opt)
-            .await?;
+        let mut file = self.storage.create_write_handle(target, &opt).await?;
 
         if let Err(error) = self.download_to_write_handle(download, &mut file).await {
             error!(%error, "error while downloading to write handle, cleaning up file");

@@ -40,6 +40,31 @@ pub(super) mod stream;
 pub(crate) mod walk;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WriteTarget<'a> {
+    File(&'a Path),
+    FileUnnamed,
+    Dir,
+}
+
+impl<'a> WriteTarget<'a> {
+    pub(crate) fn create(path: Option<&'a Path>, encoding: Option<Encoding>) -> Self {
+        let target_dir = encoding.is_some_and(|e| match e {
+            Encoding::TarGz | Encoding::Tar => true,
+            Encoding::Gz => false,
+        });
+
+        if target_dir {
+            return Self::Dir;
+        }
+
+        match path {
+            Some(path) => Self::File(path),
+            None => Self::FileUnnamed,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FileOptions {
     pub(super) id: Uuid,
     pub(super) file_size: u64,
