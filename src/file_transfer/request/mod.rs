@@ -114,6 +114,12 @@ pub(crate) enum Encoding {
     Tar = 2,
 }
 
+impl Encoding {
+    pub(crate) fn is_directory(&self) -> bool {
+        matches!(self, Encoding::TarGz | Encoding::Tar)
+    }
+}
+
 impl From<Encoding> for u8 {
     fn from(value: Encoding) -> Self {
         value as u8

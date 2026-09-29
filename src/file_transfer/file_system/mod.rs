@@ -40,37 +40,18 @@ pub(super) mod stream;
 pub(crate) mod walk;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WriteTarget<'a> {
-    File(&'a Path),
-    FileUnnamed,
-    Dir,
-}
-
-impl<'a> WriteTarget<'a> {
-    pub(crate) fn create(path: Option<&'a Path>, encoding: Option<Encoding>) -> Self {
-        let target_dir = encoding.is_some_and(|e| match e {
-            Encoding::TarGz | Encoding::Tar => true,
-            Encoding::Gz => false,
-        });
-
-        if target_dir {
-            return Self::Dir;
-        }
-
-        match path {
-            Some(path) => Self::File(path),
-            None => Self::FileUnnamed,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FileOptions {
     pub(super) id: Uuid,
     pub(super) file_size: u64,
     #[cfg(unix)]
     pub(super) perm: FilePermissions,
     pub(super) compression: Option<Encoding>,
+}
+
+impl FileOptions {
+    pub(crate) fn is_directory(&self) -> bool {
+        self.compression.is_some_and(|e| e.is_directory())
+    }
 }
 
 #[derive(Debug)]
@@ -404,5 +385,27 @@ mod tests {
         WriteHandle::try_exists(&path, alg, digest.as_ref())
             .await
             .unwrap_err();
+    }
+
+    #[test]
+    fn file_options_is_directory() {
+        let mut opt = FileOptions {
+            id: Uuid::new_v4(),
+            file_size: 0,
+            #[cfg(unix)]
+            perm: FilePermissions::default(),
+            compression: None,
+        };
+
+        assert!(!opt.is_directory());
+
+        opt.compression = Some(Encoding::Gz);
+        assert!(!opt.is_directory());
+
+        opt.compression = Some(Encoding::Tar);
+        assert!(opt.is_directory());
+
+        opt.compression = Some(Encoding::TarGz);
+        assert!(opt.is_directory());
     }
 }
