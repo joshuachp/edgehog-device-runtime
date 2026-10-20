@@ -25,6 +25,12 @@ repository.workspace = true
 rust-version.workspace = true
 description.workspace = true
 
+[package.metadata.dist]
+upgrade-guid = "728414F0-CCF5-40AF-91DE-EFB35E05A016"
+path-guid = "D4DB246F-8D9D-410E-8760-AB06E1BAC99E"
+license = false
+eula = false
+
 [workspace]
 resolver = "3"
 members = [
@@ -277,4 +283,9 @@ debug = true
 split-debuginfo = "packed"
 strip = true
 # Similar to fat in term of performances, but takes substantially less time to run
+lto = "thin"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
 lto = "thin"
