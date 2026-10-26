@@ -31,7 +31,10 @@ use uuid::Uuid;
 use crate::{
     Docker,
     error::DockerError,
-    events::deployment::{DeploymentEvent, EventStatus},
+    events::{
+        DatastreamEvent,
+        deployment::{DeploymentEvent, EventStatus},
+    },
     properties::{AvailableProp, Client, deployment::AvailableDeployment},
     requests::{
         ReqError,

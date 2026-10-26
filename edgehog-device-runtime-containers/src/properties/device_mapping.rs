@@ -18,6 +18,7 @@
 
 //! Available [`Image`](crate::docker::image::Image) property.
 
+use astarte_device_sdk::Client;
 use uuid::Uuid;
 
 use super::AvailableProp;
@@ -47,8 +48,18 @@ impl AvailableProp for AvailableDeviceMapping<'_> {
         self.id
     }
 
-    fn field() -> &'static str {
-        "present"
+    async fn send<D>(&self, device: &mut D, data: Self::Data) -> Result<(), super::PropertyError>
+    where
+        D: Client + Send + Sync + 'static,
+    {
+        self.send_field(device, "present", data).await
+    }
+
+    async fn unset<D>(&self, device: &mut D) -> Result<(), super::PropertyError>
+    where
+        D: Client + Send + Sync + 'static,
+    {
+        self.unset_field(device, "present").await
     }
 }
 

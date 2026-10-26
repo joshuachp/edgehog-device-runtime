@@ -58,16 +58,15 @@ pub(crate) trait AvailableProp {
 
     fn interface() -> &'static str;
 
-    fn field() -> &'static str;
-
     fn id(&self) -> &Uuid;
 
     async fn send<D>(&self, device: &mut D, data: Self::Data) -> Result<(), PropertyError>
     where
-        D: Client + Send + Sync + 'static,
-    {
-        self.send_field(device, Self::field(), data).await
-    }
+        D: Client + Send + Sync + 'static;
+
+    async fn unset<D>(&self, device: &mut D) -> Result<(), PropertyError>
+    where
+        D: Client + Send + Sync + 'static;
 
     async fn send_field<D, T>(
         &self,
@@ -98,12 +97,11 @@ pub(crate) trait AvailableProp {
             })
     }
 
-    async fn unset<D>(&self, device: &mut D) -> Result<(), PropertyError>
+    async fn unset_field<D>(&self, device: &mut D, field: &str) -> Result<(), PropertyError>
     where
         D: Client + Send + Sync + 'static,
     {
         let interface = Self::interface();
-        let field = Self::field();
         let endpoint = format!("/{}/{}", self.id(), field);
 
         device

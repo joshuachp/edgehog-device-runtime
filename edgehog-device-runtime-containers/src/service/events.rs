@@ -28,7 +28,10 @@ use tracing::{error, instrument};
 use uuid::Uuid;
 
 use crate::{
-    events::deployment::{DeploymentEvent, EventStatus},
+    events::{
+        DatastreamEvent,
+        deployment::{DeploymentEvent, EventStatus},
+    },
     properties::Client,
     requests::{
         ContainerRequest,

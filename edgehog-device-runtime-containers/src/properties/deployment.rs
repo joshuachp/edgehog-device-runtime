@@ -20,7 +20,7 @@
 
 use std::fmt::Display;
 
-use astarte_device_sdk::AstarteData;
+use astarte_device_sdk::{AstarteData, Client};
 use uuid::Uuid;
 
 use super::AvailableProp;
@@ -46,12 +46,22 @@ impl AvailableProp for AvailableDeployment<'_> {
         INTERFACE
     }
 
-    fn field() -> &'static str {
-        "status"
-    }
-
     fn id(&self) -> &Uuid {
         self.id
+    }
+
+    async fn send<D>(&self, device: &mut D, data: Self::Data) -> Result<(), super::PropertyError>
+    where
+        D: Client + Send + Sync + 'static,
+    {
+        self.send_field(device, "status", data).await
+    }
+
+    async fn unset<D>(&self, device: &mut D) -> Result<(), super::PropertyError>
+    where
+        D: Client + Send + Sync + 'static,
+    {
+        self.unset_field(device, "status").await
     }
 }
 
