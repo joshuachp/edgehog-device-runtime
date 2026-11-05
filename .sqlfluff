@@ -1,0 +1,5 @@
+[sqlfluff]
+dialect = sqlite
+max_line_length = 150
+
+# vim:ft=ini

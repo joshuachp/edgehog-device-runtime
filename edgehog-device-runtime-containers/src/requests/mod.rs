@@ -44,6 +44,8 @@ pub mod env_file;
 pub mod file_bind;
 pub mod image;
 pub mod network;
+pub mod secret;
+pub mod secret_ref;
 pub mod volume;
 
 /// Error from handling the Astarte request.
