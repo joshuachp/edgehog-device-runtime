@@ -126,6 +126,12 @@ impl<D> ServiceHandle<D> {
             ContainerRequest::EnvFile(create_env_file) => {
                 self.store.create_env_file(create_env_file).await
             }
+            ContainerRequest::Secret(create_secret) => {
+                self.store.create_secret(create_secret).await
+            }
+            ContainerRequest::SecretRef(create_secret_ref) => {
+                self.store.create_secret_ref(create_secret_ref).await
+            }
             ContainerRequest::Container(create_container) => {
                 self.store.create_container(create_container).await
             }
@@ -233,6 +239,22 @@ impl From<&ContainerRequest> for ContainerEvent {
                     deployment: create_env_file.deployment_id.0,
                 }
             }
+            ContainerRequest::Secret(create_secret) => {
+                let resource = Id::new(ResourceType::Secret, create_secret.id.0);
+
+                ContainerEvent::Resource {
+                    resource,
+                    deployment: create_secret.deployment_id.0,
+                }
+            }
+            ContainerRequest::SecretRef(create_secret_ref) => {
+                let resource = Id::new(ResourceType::SecretRef, create_secret_ref.id.0);
+
+                ContainerEvent::Resource {
+                    resource,
+                    deployment: create_secret_ref.deployment_id.0,
+                }
+            }
             ContainerRequest::Container(create_container) => {
                 let resource = Id::new(ResourceType::Container, create_container.id.0);
 
@@ -276,6 +298,8 @@ mod tests {
     use crate::requests::file_bind::tests::create_file_bind_req;
     use crate::requests::image::tests::create_image_req;
     use crate::requests::network::tests::create_network_req;
+    use crate::requests::secret::tests::create_secret_req;
+    use crate::requests::secret_ref::tests::create_secret_ref_req;
     use crate::requests::volume::tests::create_volume_req;
 
     use super::*;
@@ -291,6 +315,7 @@ mod tests {
         let device_request = create_device_request(DEPLOYMENT_ID);
         let file_bind = create_file_bind_req(DEPLOYMENT_ID);
         let env_file = create_env_file_req(DEPLOYMENT_ID);
+        let secret = create_secret_req(DEPLOYMENT_ID);
         let container = create_container_req(
             DEPLOYMENT_ID,
             &image,
@@ -301,6 +326,7 @@ mod tests {
             &file_bind,
             &env_file,
         );
+        let secret_ref = create_secret_ref_req(container.id.0, DEPLOYMENT_ID, secret.id.0);
 
         let cases = [
             (
@@ -349,6 +375,20 @@ mod tests {
                 ContainerRequest::EnvFile(env_file.clone()),
                 ContainerEvent::Resource {
                     resource: Id::new(ResourceType::EnvFile, env_file.id.0),
+                    deployment: DEPLOYMENT_ID,
+                },
+            ),
+            (
+                ContainerRequest::Secret(secret.clone()),
+                ContainerEvent::Resource {
+                    resource: Id::new(ResourceType::Secret, secret.id.0),
+                    deployment: DEPLOYMENT_ID,
+                },
+            ),
+            (
+                ContainerRequest::SecretRef(secret_ref.clone()),
+                ContainerEvent::Resource {
+                    resource: Id::new(ResourceType::SecretRef, secret_ref.id.0),
                     deployment: DEPLOYMENT_ID,
                 },
             ),

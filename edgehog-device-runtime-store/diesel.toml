@@ -91,4 +91,6 @@ only_tables = [
   "env_files",
   "container_env_files",
   "missing_container_env_files",
+  "secrets",
+  "secret_refs",
 ]

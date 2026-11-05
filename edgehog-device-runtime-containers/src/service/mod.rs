@@ -19,6 +19,7 @@
 //! Service to receive and handle the Astarte events.
 
 use std::fmt::{Debug, Display};
+use std::path::PathBuf;
 
 use astarte_device_sdk::astarte_device_error::Error;
 use astarte_device_sdk::event::FromEventError;
@@ -45,7 +46,7 @@ use crate::{
         deployment::Deployment, device_mapping::DeviceMappingResource,
         device_request::DeviceRequestResource, env_file::EnvFileResource,
         file_bind::FileBindResource, image::ImageResource, network::NetworkResource,
-        volume::VolumeResource,
+        secret::SecretResource, secret_ref::SecretRefResource, volume::VolumeResource,
     },
     store::{StateStore, StoreError},
 };
@@ -92,16 +93,23 @@ pub struct Service<D> {
     client: Docker,
     device: D,
     store: StateStore,
+    store_dir: PathBuf,
 }
 
 impl<D> Service<D> {
     /// Create a new service
     #[must_use]
-    pub fn new(client: Docker, device: D, store: StateStore) -> Self {
+    pub fn new(
+        client: Docker,
+        device: D,
+        store: StateStore,
+        store_dir: impl Into<PathBuf>,
+    ) -> Self {
         Self {
             client,
             device,
             store,
+            store_dir: store_dir.into(),
         }
     }
 
@@ -111,6 +119,7 @@ impl<D> Service<D> {
             store: &mut self.store,
             device: &mut self.device,
             client: &mut self.client,
+            store_dir: &self.store_dir,
         }
     }
 
@@ -177,6 +186,18 @@ impl<D> Service<D> {
             let mut context = self.context(id);
 
             EnvFileResource::publish(&mut context).await?;
+        }
+
+        for id in self.store.load_secrets_to_publish().await? {
+            let mut context = self.context(id);
+
+            SecretResource::publish(&mut context).await?;
+        }
+
+        for id in self.store.load_secret_refs_to_publish().await? {
+            let mut context = self.context(id);
+
+            SecretRefResource::publish(&mut context).await?;
         }
 
         for id in self.store.load_containers_to_publish().await? {
@@ -303,6 +324,10 @@ impl<D> Service<D> {
                 FileBindResource::publish(&mut self.context(*id.uuid())).await
             }
             ResourceType::EnvFile => EnvFileResource::publish(&mut self.context(*id.uuid())).await,
+            ResourceType::Secret => SecretResource::publish(&mut self.context(*id.uuid())).await,
+            ResourceType::SecretRef => {
+                SecretRefResource::publish(&mut self.context(*id.uuid())).await
+            }
             ResourceType::Container => {
                 ContainerResource::publish(&mut self.context(*id.uuid())).await
             }
@@ -765,12 +790,14 @@ impl<D> Service<D> {
             ResourceType::Image => ImageResource::refresh(&mut ctx).await,
             ResourceType::Volume => VolumeResource::refresh(&mut ctx).await,
             ResourceType::Network => NetworkResource::refresh(&mut ctx).await,
+            ResourceType::SecretRef => SecretRefResource::refresh(&mut ctx).await,
             ResourceType::Container => ContainerResource::refresh(&mut ctx).await,
             ResourceType::Deployment
             | ResourceType::DeviceMapping
             | ResourceType::DeviceRequest
             | ResourceType::FileBind
-            | ResourceType::EnvFile => {
+            | ResourceType::EnvFile
+            | ResourceType::Secret => {
                 debug!("nothing to refresh");
 
                 return;
@@ -853,6 +880,10 @@ pub enum ResourceType {
     FileBind,
     /// Env file resource.
     EnvFile,
+    /// Secret resource.
+    Secret,
+    /// Secret reference resource.
+    SecretRef,
     /// Container resource.
     Container,
     /// Deployment resource.
@@ -871,6 +902,8 @@ impl Display for ResourceType {
             ResourceType::Deployment => write!(f, "Deployment"),
             ResourceType::FileBind => write!(f, "FileBind"),
             ResourceType::EnvFile => write!(f, "EnvFile"),
+            ResourceType::Secret => write!(f, "Secret"),
+            ResourceType::SecretRef => write!(f, "SecretRef"),
         }
     }
 }
@@ -953,7 +986,7 @@ mod tests {
         let (tx, rx) = tokio::sync::mpsc::channel(64);
 
         let handle = ServiceHandle::new(device.clone(), store.clone(), tx);
-        let service = Service::new(client, device, store);
+        let service = Service::new(client, device, store, tempdir.path());
 
         (service, handle, rx)
     }

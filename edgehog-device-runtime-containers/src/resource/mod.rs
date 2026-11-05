@@ -42,6 +42,8 @@ pub(crate) mod env_file;
 pub(crate) mod file_bind;
 pub(crate) mod image;
 pub(crate) mod network;
+pub(crate) mod secret;
+pub(crate) mod secret_ref;
 pub(crate) mod utils;
 pub(crate) mod volume;
 
@@ -90,6 +92,7 @@ pub(crate) struct Context<'a, D> {
     pub(crate) store: &'a mut StateStore,
     pub(crate) device: &'a mut D,
     pub(crate) client: &'a Docker,
+    pub(crate) store_dir: &'a std::path::Path,
 }
 
 /// State of the object for the request.
@@ -176,7 +179,8 @@ where
             State::Recreatable | State::Missing => {
                 debug!(%state, "resource creatable, creating it");
 
-                resource.create(&mut ctx).await?;
+                let res = resource.create(&mut ctx).await;
+                Self::handle_error(&mut ctx, res).await?;
             }
             State::Existing => {
                 debug!(%state, "resource already created");

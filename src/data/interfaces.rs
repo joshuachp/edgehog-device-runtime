@@ -245,6 +245,17 @@ fn add_containers<C, S>(
     );
     const APPS_AVAILABLE_ENV_FILES: &str =
         include_str!("../../deps/interfaces/io.edgehog.devicemanager.apps.AvailableEnvFiles.json");
+    const APPS_CREATE_SECRET_REQUEST: &str = include_str!(
+        "../../deps/interfaces/io.edgehog.devicemanager.apps.CreateSecretRequest.json"
+    );
+    const APPS_AVAILABLE_SECRETS: &str =
+        include_str!("../../deps/interfaces/io.edgehog.devicemanager.apps.AvailableSecrets.json");
+    const APPS_CREATE_SECRET_REF_REQUEST: &str = include_str!(
+        "../../deps/interfaces/io.edgehog.devicemanager.apps.CreateSecretRefRequest.json"
+    );
+    const APPS_AVAILABLE_SECRET_REFS: &str = include_str!(
+        "../../deps/interfaces/io.edgehog.devicemanager.apps.AvailableSecretRefs.json"
+    );
     const APPS_IMAGE_EVENT: &str =
         include_str!("../../deps/interfaces/io.edgehog.devicemanager.apps.ImageEvent.json");
     const APPS_VOLUME_EVENT: &str =
@@ -303,6 +314,10 @@ fn add_containers<C, S>(
             .interface_str(APPS_AVAILABLE_FILE_BINDS)?
             .interface_str(APPS_CREATE_ENV_FILE_REQUEST)?
             .interface_str(APPS_AVAILABLE_ENV_FILES)?
+            .interface_str(APPS_CREATE_SECRET_REQUEST)?
+            .interface_str(APPS_AVAILABLE_SECRETS)?
+            .interface_str(APPS_CREATE_SECRET_REF_REQUEST)?
+            .interface_str(APPS_AVAILABLE_SECRET_REFS)?
             .interface_str(APPS_IMAGE_EVENT)?
             .interface_str(APPS_VOLUME_EVENT)?
             .interface_str(APPS_NETWORK_EVENT)?
