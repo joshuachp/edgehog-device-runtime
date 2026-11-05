@@ -39,6 +39,7 @@ pub(crate) struct Deployment {
     pub(crate) device_requests: FxHashSet<Uuid>,
     pub(crate) file_binds: FxHashSet<Uuid>,
     pub(crate) env_files: FxHashSet<Uuid>,
+    pub(crate) secret_refs: FxHashSet<Uuid>,
 }
 
 impl<D> Resource<D> for Deployment

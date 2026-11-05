@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS secret_refs;
+DROP TABLE IF EXISTS secrets;

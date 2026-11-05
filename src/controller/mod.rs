@@ -116,6 +116,7 @@ impl<C> Runtime<C> {
             &client,
             opts.containers,
             &store,
+            &opts.store_directory,
             tasks,
             cancel.child_token(),
         )
@@ -300,6 +301,7 @@ impl<C> Runtime<C> {
         device: &C,
         config: crate::containers::ContainersConfig,
         store: &edgehog_store::db::Handle,
+        store_dir: &std::path::Path,
         tasks: &mut JoinSet<eyre::Result<()>>,
         cancel: CancellationToken,
     ) -> eyre::Result<(
@@ -315,7 +317,7 @@ impl<C> Runtime<C> {
             return Ok((None, None));
         }
 
-        let containers = crate::containers::setup(tasks, config, device, store, cancel)
+        let containers = crate::containers::setup(tasks, config, device, store, store_dir, cancel)
             .await
             .wrap_err("couldn't create container service")?;
 

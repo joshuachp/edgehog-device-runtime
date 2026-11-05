@@ -17,7 +17,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // NOTE: this is only temporary for making CI happy
-#![allow(dead_code)]
+#![expect(dead_code)]
 
 use std::marker::Send;
 use std::pin::Pin;

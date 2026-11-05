@@ -234,6 +234,7 @@ mod tests {
             store: &mut store,
             device: &mut device,
             client: &client,
+            store_dir: tmp.path(),
         };
 
         FileBindResource::exists(&mut ctx).await.unwrap();

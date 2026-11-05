@@ -114,6 +114,7 @@ tasks:
     cmd: |
       ./scripts/ci/list-repo-files.sh '*.sql' |
         xargs sqlfluff fix -p0
+      - cmd: git diff --exit-code
 
   check-for-publish:
     if: '[[ "$IS_CRATE" = "true" ]]'

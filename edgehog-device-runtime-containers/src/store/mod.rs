@@ -32,6 +32,8 @@ pub(crate) mod env_file;
 pub(crate) mod file_bind;
 pub(crate) mod image;
 pub(crate) mod network;
+pub(crate) mod secret;
+pub(crate) mod secret_ref;
 pub(crate) mod volume;
 
 type Result<T> = std::result::Result<T, StoreError>;
@@ -72,7 +74,6 @@ impl StateStore {
     }
 }
 
-#[allow(dead_code)]
 fn split_key_value(value: &str) -> Option<(&str, Option<&str>)> {
     value.split_once('=').and_then(|(k, v)| {
         if k.is_empty() {

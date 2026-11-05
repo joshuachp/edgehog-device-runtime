@@ -18,7 +18,11 @@
 
 //! Conversions between rust and SQLITE/database types.
 
-use std::{borrow::Borrow, fmt::Display, ops::Deref};
+use std::{
+    borrow::Borrow,
+    fmt::Display,
+    ops::{Deref, DerefMut},
+};
 
 use diesel::{
     backend::Backend,
@@ -190,6 +194,47 @@ impl<const UNSET: i64> ToSql<BigInt, Sqlite> for QuotaValue<UNSET> {
         out: &mut diesel::serialize::Output<'b, '_, Sqlite>,
     ) -> diesel::serialize::Result {
         out.set_value(self.0);
+
+        Ok(IsNull::No)
+    }
+}
+
+/// Value for an [`u32`] stored as i64 in SQLite
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, FromSqlRow, AsExpression)]
+#[diesel(sql_type = BigInt)]
+#[repr(transparent)]
+pub struct SqlU32(pub u32);
+
+impl Deref for SqlU32 {
+    type Target = u32;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for SqlU32 {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl FromSql<BigInt, Sqlite> for SqlU32 {
+    fn from_sql(bytes: <Sqlite as Backend>::RawValue<'_>) -> diesel::deserialize::Result<Self> {
+        let value = i64::from_sql(bytes)?;
+
+        u32::try_from(value).map(Self).map_err(Into::into)
+    }
+}
+
+impl ToSql<BigInt, Sqlite> for SqlU32 {
+    fn to_sql<'b>(
+        &'b self,
+        out: &mut diesel::serialize::Output<'b, '_, Sqlite>,
+    ) -> diesel::serialize::Result {
+        let val = i64::from(self.0);
+
+        out.set_value(val);
 
         Ok(IsNull::No)
     }

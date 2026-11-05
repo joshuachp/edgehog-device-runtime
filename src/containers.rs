@@ -88,6 +88,7 @@ pub(crate) async fn setup<D>(
     config: ContainersConfig,
     device: &D,
     store: &db::Handle,
+    store_dir: &std::path::Path,
     cancel: CancellationToken,
 ) -> eyre::Result<Option<(mpsc::Sender<Box<ContainerRequest>>, Arc<ContainerHandle>)>>
 where
@@ -127,7 +128,7 @@ where
 
     let service = ContainerService {
         config,
-        service: Service::new(client.clone(), device.clone(), store.clone()),
+        service: Service::new(client.clone(), device.clone(), store.clone(), store_dir),
     };
     let receiver = ContainerReceiver {
         handle: ServiceHandle::new(device.clone(), store.clone(), container_tx),

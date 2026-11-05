@@ -212,6 +212,7 @@ mod tests {
             store: &mut store,
             device: &mut device,
             client: &client,
+            store_dir: tmp.path(),
         };
 
         EnvFileResource::check(&mut ctx).await.unwrap();

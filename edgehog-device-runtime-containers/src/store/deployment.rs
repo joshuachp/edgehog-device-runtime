@@ -28,6 +28,7 @@ use edgehog_store::models::containers::container::Container;
 use edgehog_store::models::containers::deployment::{
     Deployment, DeploymentContainer, DeploymentMissingContainer, DeploymentStatus,
 };
+use edgehog_store::schema::containers::secret_refs::{self};
 use edgehog_store::schema::containers::{
     container_device_mappings, container_device_requests, container_env_files,
     container_file_binds, container_missing_device_mappings, container_missing_device_requests,
@@ -310,6 +311,15 @@ impl StateStore {
                     .map(Uuid::from)
                     .collect();
 
+                let secret_refs = deployment_containers::table
+                    .inner_join(containers::table.inner_join(secret_refs::table))
+                    .filter(deployment_containers::deployment_id.eq(id))
+                    .select(secret_refs::id)
+                    .load::<SqlUuid>(reader)?
+                    .into_iter()
+                    .map(Uuid::from)
+                    .collect();
+
                 Ok(Some(DeploymentResource {
                     containers,
                     images,
@@ -319,6 +329,7 @@ impl StateStore {
                     device_requests,
                     file_binds,
                     env_files,
+                    secret_refs,
                 }))
             })
             .await?;
@@ -450,6 +461,32 @@ impl StateStore {
                     .filter_map(|container_device_request| container_device_request.map(Uuid::from))
                     .collect();
 
+                let secret_refs = Deployment::join_resources()
+                    .filter(deployment_containers::deployment_id.eq(id))
+                    .select(container_env_files::env_file_id.nullable())
+                    .except(
+                        Deployment::join_resources()
+                            .filter(deployment_containers::deployment_id.ne(id))
+                            .select(container_env_files::env_file_id.nullable()),
+                    )
+                    .load::<Option<SqlUuid>>(reader)?
+                    .into_iter()
+                    .filter_map(|container_device_request| container_device_request.map(Uuid::from))
+                    .collect();
+
+                let secret_refs = Deployment::join_resources()
+                    .filter(deployment_containers::deployment_id.eq(id))
+                    .select(secret_refs::id.nullable())
+                    .except(
+                        Deployment::join_resources()
+                            .filter(deployment_containers::deployment_id.ne(id))
+                            .select(secret_refs::id.nullable()),
+                    )
+                    .load::<Option<SqlUuid>>(reader)?
+                    .into_iter()
+                    .filter_map(|container_device_request| container_device_request.map(Uuid::from))
+                    .collect();
+
                 Ok(Some(DeploymentResource {
                     containers,
                     images,
@@ -459,6 +496,7 @@ impl StateStore {
                     device_requests,
                     file_binds,
                     env_files,
+                    secret_refs,
                 }))
             })
             .await?;
